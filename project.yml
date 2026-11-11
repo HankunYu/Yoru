@@ -1,0 +1,216 @@
+name: Yoru
+options:
+  bundleIdPrefix: com.hankunyu
+  deploymentTarget:
+    iOS: "27.1"
+  createIntermediateGroups: true
+
+packages:
+  MPVKit:
+    path: ../MPVKit
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: 47GJJ2S5J8
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+  Yoru:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - Resources/DefaultConfig
+      # Shipped as a folder so it can be copied verbatim into Documents/mpv on first launch.
+      - path: App/Resources/DefaultConfig
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: MPVKit
+        product: MPVKit-GPL
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hankunyu.Yoru
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: App/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: App/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Yoru
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIBackgroundModes: [audio]
+        NSLocalNetworkUsageDescription: Yoru plays media from servers on your local network.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Media
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              # System-declared containers (mp4, mov, avi, ts, m2ts, mp3, flac, ...) are
+              # covered by these two umbrella types.
+              - public.movie
+              - public.audio
+              - org.matroska.mkv
+              - org.webmproject.webm
+              - com.adobe.flash.video
+              - com.microsoft.windows-media-wmv
+              - com.microsoft.advanced-systems-format
+              - com.real.realmedia
+              - com.real.realmedia-vbr
+              - org.xiph.ogg-video
+              - org.videolan.vob
+              - org.videolan.divx
+              - org.smpte.mxf
+              - org.matroska.mka
+              - org.xiph.ogg-audio
+              - org.xiph.opus
+              - org.videolan.ape
+              - org.videolan.wv
+              - org.videolan.tta
+              - org.videolan.dts
+              - com.microsoft.windows-media-wma
+              - com.sony.dsf
+              - com.philips.dff
+        # Containers iOS does not declare itself. Where the system (or another app) already
+        # exports one of these identifiers, that declaration takes precedence.
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.matroska.mkv
+            UTTypeDescription: "Matroska Video"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [mkv, mk3d]
+              public.mime-type: [video/x-matroska]
+          - UTTypeIdentifier: org.webmproject.webm
+            UTTypeDescription: "WebM Video"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [webm]
+              public.mime-type: [video/webm]
+          - UTTypeIdentifier: com.adobe.flash.video
+            UTTypeDescription: "Flash Video"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [flv, f4v]
+              public.mime-type: [video/x-flv]
+          - UTTypeIdentifier: com.microsoft.windows-media-wmv
+            UTTypeDescription: "Windows Media Video"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [wmv]
+              public.mime-type: [video/x-ms-wmv]
+          - UTTypeIdentifier: com.microsoft.advanced-systems-format
+            UTTypeDescription: "Advanced Systems Format"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [asf]
+              public.mime-type: [video/x-ms-asf]
+          - UTTypeIdentifier: com.real.realmedia
+            UTTypeDescription: "RealMedia"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [rm]
+              public.mime-type: [application/vnd.rn-realmedia]
+          - UTTypeIdentifier: com.real.realmedia-vbr
+            UTTypeDescription: "RealMedia VBR"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [rmvb]
+              public.mime-type: [application/vnd.rn-realmedia-vbr]
+          - UTTypeIdentifier: org.xiph.ogg-video
+            UTTypeDescription: "Ogg Video"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [ogv, ogm]
+              public.mime-type: [video/ogg]
+          - UTTypeIdentifier: org.videolan.vob
+            UTTypeDescription: "DVD Video Object"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [vob]
+              public.mime-type: [video/dvd]
+          - UTTypeIdentifier: org.videolan.divx
+            UTTypeDescription: "DivX Video"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [divx]
+              public.mime-type: [video/divx]
+          - UTTypeIdentifier: org.smpte.mxf
+            UTTypeDescription: "Material Exchange Format"
+            UTTypeConformsTo: [public.movie]
+            UTTypeTagSpecification:
+              public.filename-extension: [mxf]
+              public.mime-type: [application/mxf]
+          - UTTypeIdentifier: org.matroska.mka
+            UTTypeDescription: "Matroska Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [mka]
+              public.mime-type: [audio/x-matroska]
+          - UTTypeIdentifier: org.xiph.ogg-audio
+            UTTypeDescription: "Ogg Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [ogg, oga]
+              public.mime-type: [audio/ogg]
+          - UTTypeIdentifier: org.xiph.opus
+            UTTypeDescription: "Opus Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [opus]
+              public.mime-type: [audio/opus]
+          - UTTypeIdentifier: org.videolan.ape
+            UTTypeDescription: "Monkey's Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [ape]
+              public.mime-type: [audio/x-ape]
+          - UTTypeIdentifier: org.videolan.wv
+            UTTypeDescription: "WavPack Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [wv]
+              public.mime-type: [audio/x-wavpack]
+          - UTTypeIdentifier: org.videolan.tta
+            UTTypeDescription: "True Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [tta]
+              public.mime-type: [audio/x-tta]
+          - UTTypeIdentifier: org.videolan.dts
+            UTTypeDescription: "DTS Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [dts]
+              public.mime-type: [audio/vnd.dts]
+          - UTTypeIdentifier: com.microsoft.windows-media-wma
+            UTTypeDescription: "Windows Media Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [wma]
+              public.mime-type: [audio/x-ms-wma]
+          - UTTypeIdentifier: com.sony.dsf
+            UTTypeDescription: "DSD Stream File"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [dsf]
+              public.mime-type: [audio/x-dsf]
+          - UTTypeIdentifier: com.philips.dff
+            UTTypeDescription: "DSDIFF Audio"
+            UTTypeConformsTo: [public.audio]
+            UTTypeTagSpecification:
+              public.filename-extension: [dff]
+              public.mime-type: [audio/x-dff]
+    scheme:
+      environmentVariables:
+        # MoltenVK HDR paths trip Metal API validation (KhronosGroup/MoltenVK#2226).
+        MTL_DEBUG_LAYER: "0"
+      enableMetalAPIValidation: false
