@@ -8,6 +8,12 @@ struct SplitControlPanel: View {
     /// A vertical drag on the panel's empty space: which half it started in and the points
     /// moved since the last call (positive upwards), or nil travel when it begins.
     let onVerticalDrag: (_ isLeftHalf: Bool, _ travel: CGFloat?) -> Void
+    /// A horizontal drag on the panel's empty space, seeking like one on the picture.
+    let onScrub: (TouchInput.Scrub) -> Void
+    /// A long press on the panel's empty space began (true) or was released (false).
+    let onHold: (_ isHolding: Bool) -> Void
+    /// A double tap on the panel's empty space, at a fraction of the way across.
+    let onDoubleTap: (_ fraction: CGFloat) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +32,9 @@ struct SplitControlPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(.white)
         // Behind the controls, so it only sees touches none of them took.
-        .background { DragSurface(onVerticalDrag: onVerticalDrag) }
+        .background {
+            DragSurface(onVerticalDrag: onVerticalDrag, onScrub: onScrub, onHold: onHold, onDoubleTap: onDoubleTap)
+        }
     }
 
     private var header: some View {
@@ -143,34 +151,90 @@ struct SplitControlPanel: View {
     }
 }
 
-/// The panel's empty space: reports vertical drags, for brightness and volume.
+/// The panel's empty space takes the picture's gestures: vertical drags (brightness,
+/// volume), horizontal drags (seeking), a long press (hold to speed up) and double taps.
+/// The single tap stays out: it shows and hides controls that are always shown here.
 private struct DragSurface: View {
     let onVerticalDrag: (_ isLeftHalf: Bool, _ travel: CGFloat?) -> Void
+    let onScrub: (TouchInput.Scrub) -> Void
+    let onHold: (_ isHolding: Bool) -> Void
+    let onDoubleTap: (_ fraction: CGFloat) -> Void
 
-    // Whether the drag in progress turned out vertical, and how far it has been reported.
-    @State private var isVertical: Bool?
+    private enum Phase {
+        /// Finger down, not yet moved far or held long enough to tell what it is.
+        case undecided
+        case vertical
+        case horizontal
+        case holding
+    }
+
+    // Travel beyond which a touch is a drag, and the time after which a still one is a hold;
+    // the same values the picture's own recognizers use.
+    private static let slop: CGFloat = 10
+    private static let holdDelay = Duration.milliseconds(350)
+
+    @State private var phase: Phase?
     @State private var reported: CGFloat = 0
+    @State private var holdTimer: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { geometry in
             Color.clear
                 .contentShape(Rectangle())
                 .gesture(
-                    DragGesture(minimumDistance: 10)
+                    DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            let isLeftHalf = value.startLocation.x < geometry.size.width / 2
-                            if isVertical == nil {
-                                // The axis is locked by the initial direction, as on the picture.
-                                isVertical = abs(value.translation.height) > abs(value.translation.width)
-                                reported = value.translation.height
-                                onVerticalDrag(isLeftHalf, nil)
+                            if phase == nil {
+                                phase = .undecided
+                                holdTimer = Task {
+                                    try? await Task.sleep(for: Self.holdDelay)
+                                    guard !Task.isCancelled, phase == .undecided else { return }
+                                    phase = .holding
+                                    onHold(true)
+                                }
                             }
-                            guard isVertical == true else { return }
-                            // Dragging up is negative height.
-                            onVerticalDrag(isLeftHalf, reported - value.translation.height)
-                            reported = value.translation.height
+                            let isLeftHalf = value.startLocation.x < geometry.size.width / 2
+                            let travel = value.translation
+                            if phase == .undecided, max(abs(travel.width), abs(travel.height)) > Self.slop {
+                                holdTimer?.cancel()
+                                // The axis is locked by the initial direction, as on the picture.
+                                if abs(travel.height) > abs(travel.width) {
+                                    phase = .vertical
+                                    reported = travel.height
+                                    onVerticalDrag(isLeftHalf, nil)
+                                } else {
+                                    phase = .horizontal
+                                    reported = travel.width
+                                    onScrub(.began)
+                                }
+                            }
+                            switch phase {
+                            case .vertical:
+                                // Dragging up is negative height.
+                                onVerticalDrag(isLeftHalf, reported - travel.height)
+                                reported = travel.height
+                            case .horizontal:
+                                // Measured from where the drag was recognized, not from touch down.
+                                onScrub(.moved(points: travel.width - reported))
+                            default:
+                                break
+                            }
                         }
-                        .onEnded { _ in isVertical = nil }
+                        .onEnded { _ in
+                            holdTimer?.cancel()
+                            switch phase {
+                            case .holding: onHold(false)
+                            case .horizontal: onScrub(.ended)
+                            default: break
+                            }
+                            phase = nil
+                        }
+                )
+                .simultaneousGesture(
+                    SpatialTapGesture(count: 2).onEnded { tap in
+                        guard geometry.size.width > 0 else { return }
+                        onDoubleTap(tap.location.x / geometry.size.width)
+                    }
                 )
         }
     }

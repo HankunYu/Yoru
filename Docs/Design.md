@@ -315,3 +315,39 @@ speed, A-B loop).
   off across the load, or the entry just deleted would come back.
 - **User scripts**: verified on the device that a Lua script in `mpv/scripts/` is loaded,
   receives events and reads properties.
+
+## Library management, downloads and bookmarks
+
+- **One transfer queue**: `FileTransfers` (app-wide) copies files into the library one at
+  a time: imports from other apps and downloads from servers alike. Its progress bar,
+  with a measured rate, sits over the whole browser, so a transfer outlives the screen
+  that started it. Each source says how one of its files is fetched
+  (`MediaSource.transfer(of:)`). Cancelling stops the running copy (a detached task does
+  not inherit cancellation; it is passed on by hand) and any folder walk still feeding it.
+- **Download plan**: servers cannot report a folder's size, so `DownloadPlan` walks the
+  selection with one listing per folder, counting while the destination sheet is open and
+  queuing as it goes once a destination is chosen. Folders merge into existing ones and a
+  file already present with the same size is skipped, so a cancelled download resumes at
+  file granularity; a size mismatch is replaced.
+- **Local files**: new folder, rename, move (`FolderPicker`), and a selection mode for
+  batch move, delete and download. Items offer their actions through `BrowserAction`.
+- **Bookmarks**: `BookmarkStore` keeps shortcuts to folders, local (stored relative to
+  Documents) or on a server; they appear on the root screen and go when their server does.
+- **Telling files apart**: images carry a symbol where videos show their duration, and a
+  filter hides everything but video and audio. Only JPEG counts as an image: it is the one
+  image format this FFmpeg build decodes.
+
+## iPad, keyboards and narrow or notched displays
+
+- **iPad**: enabled for both idioms and tested in the simulator only (launch, browser,
+  playback, control layout). The foldable APIs need iOS 27.1, hence a 27.2 simulator runtime.
+- **Keyboard**: presses reach mpv as `keydown` / `keyup` under mpv's own key names
+  (`KeyboardInput`), so default bindings and input.conf apply; mpv quitting closes the player.
+- **Occlusions come in three shapes**: a block in a corner (the outer display's camera) is
+  stepped around by the rows it overlaps; a strip down a whole side (the Dynamic Island in
+  landscape) insets both sides alike, keeping rows centered; a strip across the full width
+  (an iPad's status bar) is ignored, as nothing fits beside it.
+- **Narrow bottom bar**: where the seek capsule and the quick panel do not fit side by
+  side, the quick panel moves to a row above the seek bar (`ViewThatFits`).
+- **Split panel gestures**: the controls' half of a half-folded display takes the picture's
+  gestures on its empty space, all but the single tap, through the same bindings.

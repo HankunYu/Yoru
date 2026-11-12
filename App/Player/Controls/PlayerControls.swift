@@ -108,9 +108,19 @@ struct PlayerBottomBar: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
-        HStack(spacing: 10) {
-            seekCapsule
-            QuickPanel(model: model)
+        // Side by side where there is room; on a narrow display (an iPhone held upright)
+        // the quick panel would leave the seek bar no length, so it goes on a row of its own
+        // above the seek bar, which stays at the bottom edge.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                seekCapsule
+                    .frame(minWidth: 300)
+                QuickPanel(model: model)
+            }
+            VStack(alignment: .trailing, spacing: 10) {
+                QuickPanel(model: model)
+                seekCapsule
+            }
         }
         .frame(maxWidth: 760)
         .padding(.horizontal, ControlMetrics.edgeInset(horizontalSizeClass))

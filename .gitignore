@@ -12,3 +12,4 @@ build/
 
 # macOS
 .DS_Store
+build-sim/

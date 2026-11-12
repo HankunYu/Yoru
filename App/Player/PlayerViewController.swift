@@ -60,6 +60,41 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
+    // To receive presses from a hardware keyboard.
+    override var canBecomeFirstResponder: Bool { true }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        becomeFirstResponder()
+    }
+
+    // Keys go to mpv as key down / key up, so held keys repeat and its bindings (and the
+    // user's input.conf) decide what they do. Keys mpv has no name for go up the chain.
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        forward(presses, command: "keydown") { super.pressesBegan($0, with: event) }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        forward(presses, command: "keyup") { super.pressesEnded($0, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        forward(presses, command: "keyup") { super.pressesCancelled($0, with: event) }
+    }
+
+    private func forward(_ presses: Set<UIPress>, command: String, unhandled: (Set<UIPress>) -> Void) {
+        var rest: Set<UIPress> = []
+        for press in presses {
+            if let player, let name = press.key.flatMap(KeyboardInput.mpvName(for:)) {
+                player.command(command, name)
+            } else {
+                rest.insert(press)
+            }
+        }
+        if !rest.isEmpty {
+            unhandled(rest)
+        }
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -341,6 +376,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             } else {
                 model.onClose?()
             }
+        case .shutdown:
+            // mpv quit on its own, e.g. the `q` key on a keyboard: leave the player.
+            model.onClose?()
         default:
             model.handle(event)
         }
@@ -456,9 +494,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let seekPanel = host(PlayerBottomBar(model: model))
         controlHosts = [topBar, transport, seekPanel]
         let splitPanel = host(
-            SplitControlPanel(model: model) { [weak self] isLeftHalf, travel in
-                self?.touchInput?.verticalDrag(isLeftHalf: isLeftHalf, travel: travel)
-            },
+            SplitControlPanel(
+                model: model,
+                onVerticalDrag: { [weak self] isLeftHalf, travel in
+                    self?.touchInput?.verticalDrag(isLeftHalf: isLeftHalf, travel: travel)
+                },
+                onScrub: { [weak self] scrub in self?.model.handle(scrub) },
+                onHold: { [weak self] isHolding in self?.touchInput?.hold(isHolding) },
+                onDoubleTap: { [weak self] fraction in self?.touchInput?.doubleTap(atFraction: fraction) }
+            ),
             fillsItsFrame: true
         )
         self.splitPanel = splitPanel
@@ -532,14 +576,31 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         view.setNeedsLayout()
     }
 
+    /// The active occlusions that sit to one side and can be stepped around: a camera
+    /// housing in a corner. An iPad reports its whole status bar strip as one occlusion;
+    /// nothing fits beside that, and treating it like a camera would squeeze a row to nothing.
+    private var sideOcclusions: [CGRect] {
+        view.reservedRegions(kind: .occlusion)
+            .filter(\.isActive)
+            .map(\.frame)
+            .filter { $0.width < view.bounds.width / 2 }
+    }
+
     /// Insets each control row past the active occlusion regions (camera housing and the
     /// system area around it) that overlap that row vertically.
     private func updateControlInsets() {
-        let occlusions = view.reservedRegions(kind: .occlusion).filter(\.isActive).map(\.frame)
+        let occlusions = sideOcclusions
+        // A strip down a whole side (the Dynamic Island's, with the phone on its side)
+        // would push every row off center if only that side gave way, so both sides step
+        // in by its width. A block in one corner is stepped around only by the row it
+        // overlaps, and only on its side.
+        let strips = occlusions.filter { $0.height >= view.bounds.height * 0.9 }
+        let symmetricInset = strips.map(\.width).max() ?? 0
         for row in controlRows {
-            var leading: CGFloat = 0
-            var trailing: CGFloat = 0
-            for frame in occlusions where frame.maxY > row.host.frame.minY && frame.minY < row.host.frame.maxY {
+            var leading = symmetricInset
+            var trailing = symmetricInset
+            for frame in occlusions where !strips.contains(frame)
+                && frame.maxY > row.host.frame.minY && frame.minY < row.host.frame.maxY {
                 if frame.midX < view.bounds.midX {
                     leading = max(leading, frame.maxX)
                 } else {
@@ -584,8 +645,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
                 width: bounds.width - margin * 2, height: height
             )
         }
-        for occlusion in view.reservedRegions(kind: .occlusion).filter(\.isActive).map(\.frame)
-        where occlusion.intersects(frame) {
+        for occlusion in sideOcclusions where occlusion.intersects(frame) {
             // Give up the strip beside the occlusion, on whichever side it is.
             if occlusion.midX > bounds.midX {
                 frame.size.width = max(occlusion.minX - margin - frame.minX, 0)

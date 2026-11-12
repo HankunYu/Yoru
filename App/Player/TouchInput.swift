@@ -102,7 +102,14 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
 
     @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
         guard let view, view.bounds.width > 0 else { return }
-        switch recognizer.location(in: view).x / view.bounds.width {
+        doubleTap(atFraction: recognizer.location(in: view).x / view.bounds.width)
+    }
+
+    /// A double tap at `fraction` of the way across (0 leading, 1 trailing), sent as the
+    /// key of the third it falls in. Also used for double taps recognized outside this
+    /// object's own view.
+    func doubleTap(atFraction fraction: CGFloat) {
+        switch fraction {
         case ..<(1.0 / 3): send(.doubleTapLeft)
         case (2.0 / 3)...: send(.doubleTapRight)
         default: send(.doubleTapCenter)
@@ -192,6 +199,16 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
             positive: isLeftHalf ? .leftUp : .rightUp,
             negative: isLeftHalf ? .leftDown : .rightDown
         )
+    }
+
+    /// A long press recognized outside this object's own view began or was released; it
+    /// goes through the same binding as one on the picture.
+    func hold(_ isHolding: Bool) {
+        if isHolding {
+            send(.hold)
+        } else {
+            holdEnded()
+        }
     }
 
     private func emitSteps(_ delta: CGFloat, step: CGFloat, positive: Key, negative: Key) {
