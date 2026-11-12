@@ -135,7 +135,11 @@ struct PlayerBottomBar: View {
 
     private var seekCapsule: some View {
         HStack(spacing: 14) {
-            timeLabel(model.position)
+            // As wide as the duration, which the position never outgrows, so the bar keeps
+            // its length when the position gains a digit (9:59 to 10:00).
+            timeLabel(model.duration)
+                .hidden()
+                .overlay(alignment: .trailing) { timeLabel(model.position) }
             SeekBar(
                 position: model.position,
                 duration: model.duration,
