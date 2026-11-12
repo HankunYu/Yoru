@@ -72,7 +72,7 @@ struct AddServerView: View {
     }
 
     private var trimmedHost: String {
-        host.trimmingCharacters(in: .whitespacesAndNewlines)
+        SMBServer.host(fromAddress: host)
     }
 
     private func select(_ service: SMBDiscovery.Service) {
@@ -102,6 +102,9 @@ struct AddServerView: View {
                     _ = try SMBConnection(credentials).shares()
                     return nil
                 } catch {
+                    #if DEBUG
+                    print("[smb] connecting failed: errno \(error.code)")
+                    #endif
                     return error
                 }
             }.value

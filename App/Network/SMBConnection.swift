@@ -37,8 +37,10 @@ struct SMBEntry: Sendable {
 
 /// One libsmbclient context: a connection to a server with its own authentication state.
 ///
-/// Not thread-safe. Each instance must be used from one thread at a time; separate
-/// instances are independent.
+/// Every call into libsmbclient, on any instance, takes one process-wide lock. Contexts
+/// are not independent: the library keeps process-global state (its configuration and
+/// talloc's stack of temporary frames), and two threads inside it at once, even on
+/// different contexts, corrupt that state and abort the process.
 final class SMBConnection {
     typealias File = OpaquePointer
 
@@ -55,13 +57,12 @@ final class SMBConnection {
         }
     }
 
-    // Context creation touches Samba's process-wide configuration.
-    private static let setupLock = NSLock()
+    private static let lock = NSLock()
     private static let directoryAttribute: UInt16 = 0x10
 
     init(_ credentials: SMBCredentials) throws(SMBError) {
-        Self.setupLock.lock()
-        defer { Self.setupLock.unlock() }
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
         guard let context = smbc_new_context() else { throw SMBError(code: ENOMEM) }
         let box = Unmanaged.passRetained(CredentialBox(credentials))
         smbc_setOptionUserData(context, box.toOpaque())
@@ -89,7 +90,7 @@ final class SMBConnection {
     }
 
     deinit {
-        smbc_free_context(context, 1)
+        Self.lock.withLock { _ = smbc_free_context(context, 1) }
         credentialBox.release()
     }
 
@@ -97,6 +98,8 @@ final class SMBConnection {
 
     /// The server's disk shares, without the hidden administrative ones (`IPC$`, `C$`, ...).
     func shares() throws(SMBError) -> [SMBEntry] {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
         let directory = try openDirectory([])
         defer { closeDirectory(directory) }
         guard let read = smbc_getFunctionReaddir(context) else { throw SMBError(code: ENOSYS) }
@@ -114,11 +117,15 @@ final class SMBConnection {
 
     /// The entries of a directory, given as path components starting with the share name.
     func contents(of path: [String]) throws(SMBError) -> [SMBEntry] {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
         let directory = try openDirectory(path)
         defer { closeDirectory(directory) }
         guard let read = smbc_getFunctionReaddirPlus(context) else { throw SMBError(code: ENOSYS) }
         var entries: [SMBEntry] = []
-        errno = 0
+        // The listing was fetched in full when the directory was opened, so a failure has
+        // already been thrown there. `errno` says nothing here: libsmbclient leaves stray
+        // values in it even when a read succeeds, which made empty folders look like errors.
         while let info = read(context, directory)?.pointee {
             let name = String(cString: info.name)
             if name.hasPrefix(".") { continue }
@@ -130,13 +137,14 @@ final class SMBConnection {
                 modified: Date(timeIntervalSince1970: TimeInterval(info.mtime_ts.tv_sec))
             ))
         }
-        if errno != 0, entries.isEmpty { throw SMBError(code: errno) }
         return entries
     }
 
     // MARK: - Files
 
     func openFile(_ path: [String]) throws(SMBError) -> File {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
         guard let open = smbc_getFunctionOpen(context) else { throw SMBError(code: ENOSYS) }
         guard let file = open(context, url(for: path), O_RDONLY, 0) else { throw SMBError(code: errno) }
         return file
@@ -144,21 +152,23 @@ final class SMBConnection {
 
     /// Returns the number of bytes read, 0 at the end of the file, or a negative value on error.
     func read(_ file: File, into buffer: UnsafeMutableRawPointer, count: Int) -> Int {
-        smbc_getFunctionRead(context)?(context, file, buffer, count) ?? -1
+        Self.lock.withLock { smbc_getFunctionRead(context)?(context, file, buffer, count) ?? -1 }
     }
 
     func seek(_ file: File, to offset: Int64) -> Bool {
-        (smbc_getFunctionLseek(context)?(context, file, offset, SEEK_SET) ?? -1) >= 0
+        Self.lock.withLock { (smbc_getFunctionLseek(context)?(context, file, offset, SEEK_SET) ?? -1) >= 0 }
     }
 
     func size(of file: File) -> Int64? {
+        Self.lock.lock()
+        defer { Self.lock.unlock() }
         var status = stat()
         guard let fstat = smbc_getFunctionFstat(context), fstat(context, file, &status) >= 0 else { return nil }
         return Int64(status.st_size)
     }
 
     func close(_ file: File) {
-        _ = smbc_getFunctionClose(context)?(context, file)
+        Self.lock.withLock { _ = smbc_getFunctionClose(context)?(context, file) }
     }
 
     // MARK: - Private

@@ -12,6 +12,23 @@ struct SMBServer: Codable, Identifiable, Hashable, Sendable {
     var host: String
     /// Empty for guest access.
     var username: String
+
+    /// Reduces what was typed as an address to the bare host: people paste `smb://nas/share`
+    /// or a Windows-style `\\nas\share` as readily as `nas`.
+    static func host(fromAddress address: String) -> String {
+        var host = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let scheme = host.range(of: "://") {
+            host = String(host[scheme.upperBound...])
+        }
+        host = String(host.drop { $0 == "/" || $0 == "\\" })
+        if let end = host.firstIndex(where: { $0 == "/" || $0 == "\\" }) {
+            host = String(host[..<end])
+        }
+        if let login = host.lastIndex(of: "@") {
+            host = String(host[host.index(after: login)...])
+        }
+        return host
+    }
 }
 
 /// The saved servers, persisted as JSON in Application Support.

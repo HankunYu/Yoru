@@ -30,8 +30,11 @@ final class SMBSession: Sendable {
         _ = sessions.withLock { $0.removeValue(forKey: serverID) }
     }
 
-    /// Runs `body` with the connection, opening it first if needed. After a failure the
-    /// connection is dropped, so the next call starts from a fresh one.
+    /// Runs `body` with the connection, opening it first if needed.
+    ///
+    /// A connection kept from an earlier call may have gone stale (servers drop idle
+    /// sessions, and the phone changes networks), so a failure on a reused connection is
+    /// retried once on a fresh one. A failure on a fresh connection is reported.
     func run<T: Sendable>(_ body: @escaping @Sendable (SMBConnection) throws(SMBError) -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
@@ -39,11 +42,22 @@ final class SMBSession: Sendable {
                     guard let credentials = ServerStore.credentials(for: serverID) else {
                         throw SMBError(code: ENOENT)
                     }
-                    let connection = try connection ?? SMBConnection(credentials)
-                    self.connection = connection
-                    continuation.resume(returning: try body(connection))
+                    if let reused = connection {
+                        if let result = try? body(reused) {
+                            continuation.resume(returning: result)
+                            return
+                        }
+                        connection = nil
+                    }
+                    let fresh = try SMBConnection(credentials)
+                    let result = try body(fresh)
+                    connection = fresh
+                    continuation.resume(returning: result)
                 } catch {
-                    connection = nil
+                    #if DEBUG
+                    // os.Logger doesn't reach `devicectl --console`.
+                    print("[smb] request failed: \(error)")
+                    #endif
                     continuation.resume(throwing: error)
                 }
             }

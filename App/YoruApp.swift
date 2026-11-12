@@ -6,6 +6,11 @@ struct YoruApp: App {
     @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     init() {
+        // Writing to a socket the other end has closed raises SIGPIPE, which by default
+        // kills the process. libsmbclient writes to its sockets without guarding against
+        // it, and a server dropping an idle connection is routine; the write then fails
+        // with EPIPE instead, which is handled like any other error.
+        signal(SIGPIPE, SIG_IGN)
         ConfigDirectory.prepare()
         // The container directory is named by its ID; skip anything that does not look like one.
         let containerID = URL.homeDirectory.lastPathComponent
