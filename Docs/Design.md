@@ -34,7 +34,7 @@ Yoru/
 ├─ Sources/
 │   ├─ MediaSource # protocol: list(dir), playbackURL(item) + per-source mpv options
 │   ├─ LocalSource
-│   ├─ SMBSource   # listing via libsmb2; playback via mpv-native smb:// (libsmbclient)
+│   ├─ SMBSource   # libsmbclient for listing and playback (app-served stream, see below)
 │   └─ WebDAVSource# listing via PROPFIND; playback via mpv-native http(s)/dav(s)
 ├─ Library/        # Source-agnostic: sibling subtitle matching, same-folder playlist
 ├─ Player/         # Metal layer view, gesture → virtual key → `keypress`, OSD split
@@ -58,7 +58,8 @@ Yoru/
 
 ## 音频与生命周期
 
-- 音量只调 mpv `volume`(可设 `volume-max` 增益),物理音量键仍控制系统音量。
+- 音量手势调**系统音量**(2026-11-12 用户改定,此前为 mpv `volume`):通过隐藏的 `MPVolumeView` 内部滑块设置,依赖未公开的视图结构;
+  默认绑定 `script-message yoru volume <delta>`,想用 mpv 自身音量可改绑 `add volume`。系统音量 HUD 被抑制,由播放器 OSD 显示(含物理键)。
 - 后台播放:`UIBackgroundModes: audio`;进后台 `vid=no` 继续出声,回前台 `vid=auto`;
   接 `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter` 锁屏控制。
 - 音频会话中断(来电)、路由变化(拔耳机 → 暂停)由 App 监听处理;AO 选定 audiounit。
@@ -134,8 +135,8 @@ Yoru/
 - **SMB 两条路都做**:
   - A 系统挂载:用文件夹选择器对「文件」App 里已连接的 SMB 目录取一次授权(security-scoped bookmark),
     之后按本地目录浏览。与 `LocalSource` 共用实现,只是根目录不同。挂载 ID 重连后会变,续播键需处理。
-  - B 自带 SMB:libsmb2 列目录 + mpv 原生 `smb://` 播放,凭据存 Keychain,不依赖「文件」App。
-    先决条件:验证 libsmbclient 在 iOS 沙盒内可用(未测)。
+  - B 自带 SMB(已实现,见文末「SMB browsing」):libsmbclient 同时负责列目录和播放,凭据存 Keychain,
+    不依赖「文件」App。libsmbclient 在 iOS 沙盒内可用(已在设备上验证浏览)。
 - **打开方式**:声明 `public.movie` / `public.audio` + 21 个 iOS 未声明的容器类型(mkv、webm、rmvb、ape 等),
   原地打开不复制。`iso`(蓝光/DVD 镜像)需走 `bd://`,未做。
 
@@ -149,3 +150,45 @@ Yoru/
 - **M1** 工程骨架、本地播放、手势 + OSD、`mpv.conf`/`input.conf`、后台播放、内外屏切换。
 - **M2** SMB + WebDAV 浏览与播放、服务器管理(Keychain)、同目录字幕。
 - **M3** HDR 调优、音轨/字幕/倍速菜单、续播、同目录连播、半折桌面模式。
+
+## Browser: grid, list and thumbnails
+
+The browser shows a directory as a grid (default) or a list, sorted by name, date or size;
+both choices are app UI state in UserDefaults. One `UICollectionView` serves both layouts.
+
+- **Thumbnails** come from libmpv itself, since AVFoundation cannot read mkv: `ThumbnailRenderer`
+  runs a short-lived offscreen instance (`vo=libmpv`, software render API, software decoding,
+  `start=10%`) and reads duration, resolution and transfer function in the same pass.
+- **Cache**: `MediaPreviewStore` keeps a 640x360 JPEG and a JSON of the facts per file in
+  `Library/Caches/Previews`, keyed by path, size and modification date. Generation is serial
+  and suspended while the player is open.
+- **Resume progress**: `WatchHistory` parses `watch_later`; the player sets
+  `write-filename-in-watch-later-config` so each entry names its file.
+- **Folders** show their first three files' thumbnails as a stack of cards.
+- Only local files get thumbnails; network locations are out of scope until M2.
+
+## SMB browsing
+
+Saved servers are listed on the root screen and browsed with the same grid and list as
+local files. This replaces the earlier plan of libsmb2 listing plus mpv-native `smb://`.
+
+- **One library**: libsmbclient, already part of the GPL MPVKit build, lists shares and
+  directories (`SMBConnection`) and reads files for playback (`SMBStream`).
+- **No credentials in URLs**: items are addressed as `yoru-smb://<server id>/<share>/<path>`.
+  mpv opens that scheme through libmpv's `stream_cb` (`MPVStreamProtocol`), and the app
+  looks the login up when connecting. An `smb://user:pass@host` URL would have put the
+  password into mpv's log and the `watch_later` files in Documents.
+- **Storage**: `ServerStore` keeps name, host and username as JSON in Application Support;
+  passwords are Keychain items (`AfterFirstUnlock`, so background playback can reconnect).
+- **Connections**: a libsmbclient context is not thread-safe. Browsing uses one context per
+  server on its own serial queue (`SMBSession`); each playing file has its own context.
+- **Module**: MPVKit's `Libsmbclient` module is an umbrella over headers that need
+  `talloc.h` and cannot be imported, so `Vendor/CSMBClient` exposes `libsmbclient.h` alone.
+- **Discovery**: Bonjour `_smb._tcp` via `NWBrowser`; the host name comes from
+  `DNSServiceResolve`, since the service's display name is not an address.
+- **Subtitles**: mpv scans for same-folder subtitles only for local files, so the browser
+  passes matching siblings to the player, which attaches them with `sub-add`.
+- **Limits**: remote items have no thumbnails, cannot be deleted, and folders show no item
+  count. Saved servers cannot be edited, only removed and added again.
+- **Not yet verified on device**: playback throughput and seeking on high-bitrate files,
+  subtitle attachment, resume.

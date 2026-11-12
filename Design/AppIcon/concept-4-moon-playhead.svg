@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#0b0c24"/>
+  <stop offset="0.527" stop-color="#232a66"/>
+  <stop offset="0.528" stop-color="#0d0e2a"/>
+  <stop offset="1" stop-color="#06060f"/>
+</linearGradient>
+<linearGradient id="moon" x1="0" y1="0" x2="0.5" y2="1">
+  <stop offset="0" stop-color="#fdf6e4"/>
+  <stop offset="1" stop-color="#e2d6c0"/>
+</linearGradient>
+<filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+  <feGaussianBlur stdDeviation="55"/>
+</filter></defs>
+
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<circle cx="590" cy="540" r="200" fill="#9a94ff" opacity="0.38" filter="url(#glow)"/>
+<ellipse cx="590" cy="800" rx="120" ry="110" fill="#f4e6c4" opacity="0.16" filter="url(#glow)"/>
+<rect x="0" y="522" width="1024" height="36" fill="#ffffff" opacity="0.16"/>
+<rect x="0" y="522" width="590" height="36" fill="#f4b860"/>
+<circle cx="590" cy="540" r="165" fill="url(#moon)"/>
+</svg>

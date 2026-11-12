@@ -3,6 +3,7 @@ import SwiftUI
 /// Top bar: close, title and the playback menu.
 struct PlayerTopBar: View {
     let model: PlayerModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         HStack(spacing: 12) {
@@ -18,60 +19,47 @@ struct PlayerTopBar: View {
 
             PlaybackMenu(model: model)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, ControlMetrics.edgeInset(horizontalSizeClass))
+        .padding(.top, ControlMetrics.topInset(horizontalSizeClass))
+        .padding(.bottom, 8)
     }
 }
 
-/// Audio / subtitle / speed selection and overlays.
+/// Distance of the control rows from the screen edges.
+///
+/// Large displays (the iPhone Duo's inner screen) report no safe-area inset at the top or
+/// sides, yet have generously rounded corners, so the rows need more room there than the
+/// safe area asks for.
+enum ControlMetrics {
+    static func edgeInset(_ sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        sizeClass == .regular ? 30 : 16
+    }
+
+    static func topInset(_ sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        sizeClass == .regular ? 22 : 8
+    }
+
+    static func bottomInset(_ sizeClass: UserInterfaceSizeClass?) -> CGFloat {
+        sizeClass == .regular ? 14 : 8
+    }
+}
+
+/// Overlays that are rarely needed: mpv's statistics and Yoru's diagnostics.
 private struct PlaybackMenu: View {
     let model: PlayerModel
 
     var body: some View {
         Menu {
-            if !model.audioTracks.isEmpty {
-                Menu("Audio", systemImage: "waveform") {
-                    trackItems(model.audioTracks, kind: .audio, allowsNone: false)
-                }
-            }
-            Menu("Subtitles", systemImage: "captions.bubble") {
-                trackItems(model.subtitleTracks, kind: .sub, allowsNone: true)
-            }
-            Menu("Speed", systemImage: "gauge.with.dots.needle.50percent") {
-                ForEach(PlayerModel.speeds, id: \.self) { speed in
-                    Toggle(PlayerModel.format(speed: speed), isOn: Binding(
-                        get: { abs(model.speed - speed) < 0.001 },
-                        set: { _ in model.setSpeed(speed) }
-                    ))
-                }
-            }
-            Divider()
             Button("Statistics", systemImage: "chart.bar.xaxis") { model.toggleStats() }
             Toggle("Diagnostics", systemImage: "stethoscope", isOn: Binding(
                 get: { model.showsDiagnostics },
                 set: { model.showsDiagnostics = $0 }
             ))
         } label: {
-            Label("Playback Options", systemImage: "ellipsis")
+            Label("More", systemImage: "ellipsis")
         }
         .buttonStyle(GlassCircleButtonStyle())
         .simultaneousGesture(TapGesture().onEnded { model.keepControlsVisible() })
-    }
-
-    @ViewBuilder
-    private func trackItems(_ tracks: [MediaTrack], kind: MediaTrack.Kind, allowsNone: Bool) -> some View {
-        if allowsNone {
-            Toggle("Off", isOn: Binding(
-                get: { !tracks.contains(where: \.isSelected) },
-                set: { _ in model.select(nil, kind: kind) }
-            ))
-        }
-        ForEach(tracks) { track in
-            Toggle(track.displayName, isOn: Binding(
-                get: { track.isSelected },
-                set: { _ in model.select(track, kind: kind) }
-            ))
-        }
     }
 }
 
@@ -102,11 +90,22 @@ struct PlayerTransport: View {
     }
 }
 
-/// Floating seek panel: elapsed time, seek bar, total time.
-struct PlayerSeekPanel: View {
+/// Bottom row: the seek capsule and, to its right, the quick panel.
+struct PlayerBottomBar: View {
     let model: PlayerModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
+        HStack(spacing: 10) {
+            seekCapsule
+            QuickPanel(model: model)
+        }
+        .frame(maxWidth: 760)
+        .padding(.horizontal, ControlMetrics.edgeInset(horizontalSizeClass))
+        .padding(.bottom, ControlMetrics.bottomInset(horizontalSizeClass))
+    }
+
+    private var seekCapsule: some View {
         HStack(spacing: 14) {
             timeLabel(model.position)
             SeekBar(
@@ -118,11 +117,8 @@ struct PlayerSeekPanel: View {
             timeLabel(model.duration)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 6)
+        .frame(height: 44)
         .glassEffect(.regular, in: .capsule)
-        .frame(maxWidth: 640)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
     }
 
     private func timeLabel(_ seconds: Double) -> some View {
@@ -130,6 +126,71 @@ struct PlayerSeekPanel: View {
             .font(.footnote.weight(.medium).monospacedDigit())
             .foregroundStyle(.white.opacity(0.9))
             .fixedSize()
+    }
+}
+
+/// The things changed most while watching, one tap away: subtitles, audio, speed.
+private struct QuickPanel: View {
+    let model: PlayerModel
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Menu {
+                Toggle("Off", isOn: Binding(
+                    get: { !model.subtitleTracks.contains(where: \.isSelected) },
+                    set: { _ in model.select(nil, kind: .sub) }
+                ))
+                trackItems(model.subtitleTracks, kind: .sub)
+            } label: {
+                item(Image(systemName: "captions.bubble"), label: "Subtitles")
+            }
+
+            if model.audioTracks.count > 1 {
+                Menu {
+                    trackItems(model.audioTracks, kind: .audio)
+                } label: {
+                    item(Image(systemName: "waveform"), label: "Audio")
+                }
+            }
+
+            Menu {
+                ForEach(PlayerModel.speeds, id: \.self) { speed in
+                    Toggle(PlayerModel.format(speed: speed), isOn: Binding(
+                        get: { abs(model.speed - speed) < 0.001 },
+                        set: { _ in model.setSpeed(speed) }
+                    ))
+                }
+            } label: {
+                item(
+                    Text(PlayerModel.format(speed: model.speed))
+                        .font(.footnote.weight(.semibold).monospacedDigit()),
+                    label: "Speed"
+                )
+            }
+        }
+        .menuOrder(.fixed)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .frame(height: 44)
+        .glassEffect(.regular, in: .capsule)
+        .simultaneousGesture(TapGesture().onEnded { model.keepControlsVisible() })
+    }
+
+    private func item(_ content: some View, label: LocalizedStringKey) -> some View {
+        content
+            .font(.system(size: 16, weight: .medium))
+            .frame(width: 40, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel(label)
+    }
+
+    private func trackItems(_ tracks: [MediaTrack], kind: MediaTrack.Kind) -> some View {
+        ForEach(tracks) { track in
+            Toggle(track.displayName, isOn: Binding(
+                get: { track.isSelected },
+                set: { _ in model.select(track, kind: kind) }
+            ))
+        }
     }
 }
 

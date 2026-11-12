@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><filter id="b1" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="50"/></filter><filter id="b2" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="16"/></filter>
+<radialGradient id="bg" cx="0.75" cy="0.5" r="0.9">
+  <stop offset="0" stop-color="#2a1230"/><stop offset="0.5" stop-color="#150a1c"/><stop offset="1" stop-color="#07040a"/></radialGradient>
+<linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+  <stop offset="0" stop-color="#f6c9c0" stop-opacity="0"/><stop offset="0.08" stop-color="#f6c9c0" stop-opacity="0"/><stop offset="0.2" stop-color="#f6c9c0" stop-opacity="0.012"/><stop offset="0.3" stop-color="#f6c9c0" stop-opacity="0.04"/><stop offset="0.4" stop-color="#f5c7c2" stop-opacity="0.1"/><stop offset="0.52" stop-color="#f3c4c4" stop-opacity="0.24"/><stop offset="0.68" stop-color="#f8d3cc" stop-opacity="0.5"/>
+  <stop offset="0.85" stop-color="#ffe9df" stop-opacity="0.9"/><stop offset="1" stop-color="#fffaf4"/></linearGradient></defs>
+
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<path d="M150.0,280.4 A30,30 0 0 1 191.2,252.6 L766.8,484.2 A30,30 0 0 1 766.8,539.8 L191.2,771.4 A30,30 0 0 1 150.0,743.6Z" fill="url(#beam)" filter="url(#b1)" opacity="0.7"/>
+<path d="M150.0,280.4 A30,30 0 0 1 191.2,252.6 L766.8,484.2 A30,30 0 0 1 766.8,539.8 L191.2,771.4 A30,30 0 0 1 150.0,743.6Z" fill="url(#beam)"/>
+<circle cx="800" cy="512" r="60" fill="#fff3ea" opacity="0.75" filter="url(#b1)"/>
+<circle cx="806" cy="512" r="18" fill="#ffffff" filter="url(#b2)"/>
+</svg>

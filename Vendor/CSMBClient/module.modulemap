@@ -1,0 +1,8 @@
+// MPVKit's Libsmbclient framework ships an umbrella module over every Samba header, most
+// of which need headers it does not ship (talloc.h, ...), so the module cannot be imported.
+// This module exposes the one public header instead. libsmbclient.h is copied from the
+// framework (Samba 4.15.13); copy it again when MPVKit moves to another Samba version.
+module CSMBClient {
+    header "libsmbclient.h"
+    export *
+}

@@ -21,6 +21,7 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
         case rightDown = "GESTURE_RIGHT_DOWN"
         case pinchIn = "GESTURE_PINCH_IN"
         case pinchOut = "GESTURE_PINCH_OUT"
+        case hold = "GESTURE_HOLD"
     }
 
     /// A horizontal drag, reported as the total travel in points since it began.
@@ -44,16 +45,25 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
 
     private let send: (Key) -> Void
     private let scrub: (Scrub) -> Void
+    private let holdEnded: () -> Void
     private var scrubTravel: CGFloat = 0
     private weak var view: UIView?
     private var panAxis: PanAxis?
     private var panResidual: CGFloat = 0
     private var pinchReference: CGFloat = 1
 
-    init(view: UIView, send: @escaping (Key) -> Void, scrub: @escaping (Scrub) -> Void) {
+    /// - Parameter holdEnded: Called when the finger lifts after a long press. mpv bindings
+    ///   only fire on key down, so the end of a hold is reported separately.
+    init(
+        view: UIView,
+        send: @escaping (Key) -> Void,
+        scrub: @escaping (Scrub) -> Void,
+        holdEnded: @escaping () -> Void
+    ) {
         self.view = view
         self.send = send
         self.scrub = scrub
+        self.holdEnded = holdEnded
         super.init()
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
@@ -64,8 +74,10 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
+        hold.minimumPressDuration = 0.35
 
-        for recognizer in [doubleTap, tap, pan, pinch] {
+        for recognizer in [doubleTap, tap, pan, pinch, hold] {
             view.addGestureRecognizer(recognizer)
         }
     }
@@ -126,6 +138,17 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
                 scrub(.ended)
             }
             panAxis = nil
+        }
+    }
+
+    @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            send(.hold)
+        case .ended, .cancelled, .failed:
+            holdEnded()
+        default:
+            break
         }
     }
 

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs>
+<radialGradient id="bg" cx="0.5" cy="0.4" r="0.85"><stop offset="0" stop-color="#3a2f6b"/><stop offset="0.55" stop-color="#1d1840"/><stop offset="1" stop-color="#0c0a1f"/></radialGradient>
+<linearGradient id="moon" x1="0.1" y1="0" x2="0.7" y2="1">
+  <stop offset="0" stop-color="#fbf4e2"/><stop offset="1" stop-color="#dccfb8"/>
+</linearGradient>
+<filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="60"/></filter>
+<radialGradient id="lit" cx="0.35" cy="0.3" r="0.9">
+  <stop offset="0" stop-color="#fffaf0"/><stop offset="0.6" stop-color="#eadfcd"/><stop offset="1" stop-color="#c9bcc4"/>
+</radialGradient>
+<clipPath id="disc"><circle cx="512" cy="512" r="300"/></clipPath>
+<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="16"/></filter>
+<linearGradient id="hole" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#2c2358"/><stop offset="1" stop-color="#191437"/>
+</linearGradient></defs>
+
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<circle cx="512" cy="512" r="300" fill="#b9a6ff" opacity="0.28" filter="url(#glow)"/>
+<g transform="rotate(-24 512 512)">
+<circle cx="512" cy="512" r="300" fill="#8272b4"/>
+<g clip-path="url(#disc)"><path d="M512,150 A362,362 0 0 0 512,874 A215,362 0 0 0 512,150Z" fill="url(#lit)" filter="url(#soft)"/></g>
+</g>
+<polygon points="411.6,397.0 610.8,512.0 411.6,627.0" fill="url(#hole)" stroke="url(#hole)" stroke-width="52" stroke-linejoin="round" />
+</svg>

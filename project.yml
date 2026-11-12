@@ -4,6 +4,7 @@ options:
   deploymentTarget:
     iOS: "27.1"
   createIntermediateGroups: true
+  developmentLanguage: en
 
 packages:
   MPVKit:
@@ -43,10 +44,13 @@ targets:
         INFOPLIST_FILE: App/Resources/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
+        # Local module exposing libsmbclient.h; see Vendor/CSMBClient/module.modulemap.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CSMBClient
     info:
       path: App/Resources/Info.plist
       properties:
         CFBundleDisplayName: YORU
+        CFBundleLocalizations: [en, zh-Hans, zh-Hant, ja, ko]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen: {}
@@ -54,6 +58,7 @@ targets:
         LSSupportsOpeningDocumentsInPlace: true
         UIBackgroundModes: [audio]
         NSLocalNetworkUsageDescription: YORU plays media from servers on your local network.
+        NSBonjourServices: [_smb._tcp]
         CFBundleDocumentTypes:
           - CFBundleTypeName: Media
             CFBundleTypeRole: Viewer

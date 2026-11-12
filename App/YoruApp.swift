@@ -24,12 +24,13 @@ struct YoruApp: App {
 
 struct RootView: View {
     @State private var playing: PlaybackTarget?
+    @State private var path: [BrowserItem] = []
 
     var body: some View {
-        NavigationStack {
-            LocalBrowserView(directory: .documentsDirectory, playing: $playing)
+        NavigationStack(path: $path) {
+            BrowserView(directory: .documentsDirectory, playing: $playing, path: $path)
                 .navigationDestination(for: BrowserItem.self) { item in
-                    LocalBrowserView(directory: item.url, playing: $playing)
+                    BrowserView(directory: item.url, playing: $playing, path: $path)
                 }
         }
         // Files opened from other apps (Files, share sheet) arrive here and play in place.

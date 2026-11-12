@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs>
+<radialGradient id="bg" cx="0.5" cy="0.4" r="0.85"><stop offset="0" stop-color="#17172a"/><stop offset="0.6" stop-color="#0b0b16"/><stop offset="1" stop-color="#050509"/></radialGradient>
+<linearGradient id="moon" x1="0.1" y1="0" x2="0.7" y2="1">
+  <stop offset="0" stop-color="#fdf3dc"/><stop offset="1" stop-color="#e6d3ae"/>
+</linearGradient>
+<filter id="glow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="60"/></filter>
+<mask id="cut"><rect width="1024" height="1024" fill="#fff"/>
+  <polygon points="463.0,292.0 844.0,512.0 463.0,732.0" fill="#000" stroke="#000" stroke-width="68" stroke-linejoin="round" /></mask></defs>
+
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<circle cx="512" cy="512" r="300" fill="#f2c57a" opacity="0.05" filter="url(#glow)"/>
+<circle cx="512" cy="512" r="310" fill="url(#moon)" mask="url(#cut)"/>
+</svg>

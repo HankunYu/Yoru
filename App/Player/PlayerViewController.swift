@@ -5,7 +5,8 @@ import UIKit
 /// around it: touch input, the SwiftUI controls, lock screen integration, and the iOS
 /// lifecycle glue (background audio, foldable posture).
 final class PlayerViewController: UIViewController {
-    private let location: String
+    private let target: PlaybackTarget
+    private var hasAttachedSubtitles = false
     private let model = PlayerModel()
     private let playerView = PlayerView()
 
@@ -14,15 +15,24 @@ final class PlayerViewController: UIViewController {
     private var touchInput: TouchInput?
     private var postureMonitor: PostureMonitor?
     private var nowPlaying: NowPlayingSession?
+    private var systemVolume: SystemVolume?
     private var controlHosts: [UIView] = []
+    // The full-width control rows and their trailing/leading edge constraints, adjusted by
+    // `updateControlInsets()` to step around occlusions.
+    private var controlRows: [(host: UIView, leading: NSLayoutConstraint, trailing: NSLayoutConstraint)] = []
     private var savedVideoTrack = "auto"
     private var currentVideoTrack: String?
     private var edrHeadroom: CGFloat = 1
 
-    init(location: String, onClose: @escaping () -> Void) {
-        self.location = location
+    init(target: PlaybackTarget, onClose: @escaping () -> Void) {
+        self.target = target
         super.init(nibName: nil, bundle: nil)
         model.onClose = onClose
+        MediaPreviewStore.shared.suspend()
+    }
+
+    deinit {
+        MediaPreviewStore.shared.resume()
     }
 
     @available(*, unavailable)
@@ -42,7 +52,8 @@ final class PlayerViewController: UIViewController {
         touchInput = TouchInput(
             view: playerView,
             send: { [weak self] key in self?.player?.command("keypress", key.rawValue) },
-            scrub: { [weak self] scrub in self?.model.handle(scrub) }
+            scrub: { [weak self] scrub in self?.model.handle(scrub) },
+            holdEnded: { [weak self] in self?.model.endHoldSpeed() }
         )
 
         let monitor = PostureMonitor(view: playerView)
@@ -59,6 +70,10 @@ final class PlayerViewController: UIViewController {
             screen.brightness = min(max(screen.brightness + delta, 0), 1)
             return screen.brightness
         }
+        let volume = SystemVolume(hostView: view)
+        volume.onChange = { [weak self] level in self?.model.systemVolumeDidChange(level) }
+        model.adjustSystemVolume = { [weak volume] delta in volume?.adjust(by: delta) }
+        systemVolume = volume
         trackControlsVisibility()
 
         NotificationCenter.default.addObserver(
@@ -100,6 +115,8 @@ final class PlayerViewController: UIViewController {
             ("save-position-on-quit", "yes"),
             ("input-default-bindings", "yes"),
             ("watch-later-dir", ConfigDirectory.url.appending(path: "watch_later").path),
+            // Lets WatchHistory map saved positions back to files.
+            ("write-filename-in-watch-later-config", "yes"),
             // Default and fallback subtitle font; see ConfigDirectory for why it is bundled.
             ("sub-font", "Noto Sans CJK SC"),
             ("osd-font", "Noto Sans CJK SC"),
@@ -117,7 +134,8 @@ final class PlayerViewController: UIViewController {
             let player = try MPVPlayer(
                 layer: playerView.metalLayer,
                 configDirectory: ConfigDirectory.url,
-                options: options
+                options: options,
+                streamProtocols: MediaSources.streamProtocols
             )
             self.player = player
             syncSurfaceSize()
@@ -131,7 +149,11 @@ final class PlayerViewController: UIViewController {
                     self?.handle(event)
                 }
             }
-            player.command("loadfile", location)
+            if target.forcesCache {
+                player.command("loadfile", target.location, "replace", "-1", "cache=yes")
+            } else {
+                player.command("loadfile", target.location)
+            }
         } catch {
             Log.player.error("Starting mpv failed: \(error.description, privacy: .public)")
             model.report(error: error.description)
@@ -143,8 +165,13 @@ final class PlayerViewController: UIViewController {
         eventTask = nil
         nowPlaying?.invalidate()
         nowPlaying = nil
+        systemVolume?.invalidate()
+        systemVolume = nil
         model.detach()
-        player?.destroy()
+        // The resume position is written as mpv shuts down.
+        player?.destroy {
+            Task { @MainActor in WatchHistory.shared.reload() }
+        }
         player = nil
     }
 
@@ -178,6 +205,14 @@ final class PlayerViewController: UIViewController {
             // os.Logger doesn't reach `devicectl --console`; mirror mpv logs to stdout while debugging.
             print("[mpv/\(prefix)] \(level): \(text)", terminator: "")
             #endif
+        case .fileLoaded:
+            if !hasAttachedSubtitles {
+                hasAttachedSubtitles = true
+                for subtitle in target.externalSubtitles {
+                    player?.command("sub-add", subtitle, "auto")
+                }
+            }
+            model.handle(event)
         default:
             model.handle(event)
         }
@@ -226,10 +261,19 @@ final class PlayerViewController: UIViewController {
         backdrop.isUserInteractionEnabled = false
         let topBar = host(PlayerTopBar(model: model))
         let transport = host(PlayerTransport(model: model))
-        let seekPanel = host(PlayerSeekPanel(model: model))
+        let seekPanel = host(PlayerBottomBar(model: model))
         controlHosts = [topBar, transport, seekPanel]
 
         let guide = view.safeAreaLayoutGuide
+        // Horizontally both rows span the whole view, not the safe area. On the iPhone Duo's
+        // outer display the safe area reserves a full-height 84pt strip for a camera that
+        // only occupies one corner; honoring it would leave every row visibly off-center.
+        // Each row instead avoids just the occlusions that overlap it.
+        controlRows = [topBar, seekPanel].map { row in
+            (row, row.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+             view.trailingAnchor.constraint(equalTo: row.trailingAnchor))
+        }
+        NSLayoutConstraint.activate(controlRows.flatMap { [$0.leading, $0.trailing] })
         NSLayoutConstraint.activate([
             playerView.topAnchor.constraint(equalTo: view.topAnchor),
             playerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -242,17 +286,37 @@ final class PlayerViewController: UIViewController {
             backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
             topBar.topAnchor.constraint(equalTo: guide.topAnchor),
-            topBar.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
-            topBar.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
 
             transport.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             transport.centerYAnchor.constraint(equalTo: view.centerYAnchor),
 
             seekPanel.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
-            seekPanel.centerXAnchor.constraint(equalTo: guide.centerXAnchor),
-            seekPanel.widthAnchor.constraint(lessThanOrEqualTo: guide.widthAnchor),
-            seekPanel.widthAnchor.constraint(equalTo: guide.widthAnchor).withPriority(.defaultHigh),
+
         ])
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateControlInsets()
+    }
+
+    /// Insets each control row past the active occlusion regions (camera housing and the
+    /// system area around it) that overlap that row vertically.
+    private func updateControlInsets() {
+        let occlusions = view.reservedRegions(kind: .occlusion).filter(\.isActive).map(\.frame)
+        for row in controlRows {
+            var leading: CGFloat = 0
+            var trailing: CGFloat = 0
+            for frame in occlusions where frame.maxY > row.host.frame.minY && frame.minY < row.host.frame.maxY {
+                if frame.midX < view.bounds.midX {
+                    leading = max(leading, frame.maxX)
+                } else {
+                    trailing = max(trailing, view.bounds.width - frame.minX)
+                }
+            }
+            if row.leading.constant != leading { row.leading.constant = leading }
+            if row.trailing.constant != trailing { row.trailing.constant = trailing }
+        }
     }
 
     private func host(_ content: some View) -> UIView {
@@ -309,13 +373,11 @@ final class PlayerViewController: UIViewController {
                 lines.append("division: \(region.frame.integral) active=\(region.isActive)")
             }
         }
+        let insets = view.safeAreaInsets
+        lines.append(String(format: "safe area: t=%.0f l=%.0f b=%.0f r=%.0f", insets.top, insets.left, insets.bottom, insets.right))
+        for region in view.reservedRegions(kind: .occlusion, options: .includeInactive) {
+            lines.append("occlusion: \(region.frame.integral) active=\(region.isActive)")
+        }
         return lines
-    }
-}
-
-private extension NSLayoutConstraint {
-    func withPriority(_ priority: UILayoutPriority) -> NSLayoutConstraint {
-        self.priority = priority
-        return self
     }
 }

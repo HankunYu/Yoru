@@ -20,7 +20,7 @@ struct MediaTrack: Identifiable, Equatable {
         var parts: [String] = []
         if let title, !title.isEmpty { parts.append(title) }
         if let language, !language.isEmpty { parts.append(language.uppercased()) }
-        if parts.isEmpty { parts.append("Track \(id)") }
+        if parts.isEmpty { parts.append(String(localized: "Track \(id)")) }
         if let codec, !codec.isEmpty { parts.append(codec) }
         return parts.joined(separator: " · ")
     }
@@ -67,6 +67,9 @@ final class PlayerModel {
 
     /// Called for `script-message yoru brightness <delta>`; returns the new 0...1 level.
     var adjustBrightness: ((Double) -> Double)?
+    /// Called for `script-message yoru volume <delta>`; the new level arrives through
+    /// `systemVolumeDidChange`.
+    var adjustSystemVolume: ((Double) -> Void)?
     var onClose: (() -> Void)?
 
     static let speeds: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
@@ -92,6 +95,10 @@ final class PlayerModel {
     private var resumesAfterScrub = false
     // Position when a swipe scrub began; the swipe seeks relative to it.
     private var swipeOrigin: Double = 0
+    // Speed to return to when a `hold-speed` ends; nil when no hold is active.
+    private var speedBeforeHold: Double?
+    // Pending speed changes issued by a hold, whose property events must not raise an OSD.
+    private var silentSpeedChanges = 0
     private var hideControlsTask: Task<Void, Never>?
     private var hideOSDTask: Task<Void, Never>?
     // Properties whose changes surface as an OSD message; the first event for each is the
@@ -239,6 +246,37 @@ final class PlayerModel {
         onClose?()
     }
 
+    private func beginHoldSpeed(_ holdSpeed: Double) {
+        guard speedBeforeHold == nil else { return }
+        speedBeforeHold = speed
+        setSpeedSilently(holdSpeed)
+        show(OSDMessage(symbol: "forward.fill", text: Self.format(speed: holdSpeed)), sticky: true)
+    }
+
+    /// The finger lifted after a long press: undo a running `hold-speed`.
+    func endHoldSpeed() {
+        guard let previous = speedBeforeHold else { return }
+        speedBeforeHold = nil
+        setSpeedSilently(previous)
+        osd = nil
+    }
+
+    private func setSpeedSilently(_ newSpeed: Double) {
+        // mpv reports no change event when the value stays the same.
+        guard abs(newSpeed - speed) > 0.0001 else { return }
+        silentSpeedChanges += 1
+        player?.setProperty("speed", String(newSpeed))
+    }
+
+    /// The system volume changed (gesture or hardware buttons).
+    func systemVolumeDidChange(_ level: Double) {
+        show(OSDMessage(
+            symbol: level <= 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
+            text: "\(Int((level * 100).rounded()))%",
+            level: level
+        ))
+    }
+
     func toggleControls() {
         controlsVisible ? hideControls() : keepControlsVisible()
     }
@@ -308,6 +346,11 @@ final class PlayerModel {
         case "speed":
             speed = value.doubleValue ?? 1
             nowPlayingReferencePosition = position
+            // Changes made by a hold are announced by the hold itself.
+            if silentSpeedChanges > 0 {
+                silentSpeedChanges -= 1
+                return
+            }
             announce(name) {
                 OSDMessage(symbol: "gauge.with.dots.needle.50percent", text: Self.format(speed: speed))
             }
@@ -339,6 +382,12 @@ final class PlayerModel {
             toggleControls()
         case "show-position":
             show(OSDMessage(symbol: Self.positionSymbol, text: positionText))
+        case "hold-speed":
+            guard arguments.count >= 3, let holdSpeed = Double(arguments[2]), holdSpeed > 0 else { return }
+            beginHoldSpeed(holdSpeed)
+        case "volume":
+            guard arguments.count >= 3, let delta = Double(arguments[2]) else { return }
+            adjustSystemVolume?(delta)
         case "brightness":
             guard arguments.count >= 3, let delta = Double(arguments[2]), let level = adjustBrightness?(delta) else {
                 return
@@ -365,9 +414,11 @@ final class PlayerModel {
         show(message())
     }
 
-    private func show(_ message: OSDMessage) {
+    /// - Parameter sticky: Keep the message up until it is replaced or cleared.
+    private func show(_ message: OSDMessage, sticky: Bool = false) {
         osd = message
         hideOSDTask?.cancel()
+        guard !sticky else { return }
         hideOSDTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.2))
             guard !Task.isCancelled else { return }

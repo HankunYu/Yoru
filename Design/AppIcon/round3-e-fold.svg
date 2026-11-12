@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><filter id="b1" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="60"/></filter>
+<linearGradient id="bgl" x1="0" y1="0" x2="1" y2="0">
+  <stop offset="0" stop-color="#0b0a0f"/><stop offset="1" stop-color="#15131b"/></linearGradient>
+<linearGradient id="bgr" x1="0" y1="0" x2="1" y2="0">
+  <stop offset="0" stop-color="#24212c"/><stop offset="1" stop-color="#131118"/></linearGradient>
+<linearGradient id="ml" x1="0" y1="0" x2="1" y2="0">
+  <stop offset="0" stop-color="#a99e8b"/><stop offset="1" stop-color="#7d7466"/></linearGradient>
+<linearGradient id="mr" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#fffaf0"/><stop offset="1" stop-color="#e3d6bd"/></linearGradient></defs>
+
+<rect width="512" height="1024" fill="url(#bgl)"/>
+<rect x="512" width="512" height="1024" fill="url(#bgr)"/>
+<path d="M512,262 A250,250 0 0 1 512,762Z" fill="#f3dfb8" opacity="0.35" filter="url(#b1)"/>
+<path d="M512,262 A250,250 0 0 0 512,762Z" fill="url(#ml)"/>
+<path d="M512,262 A250,250 0 0 1 512,762Z" fill="url(#mr)"/>
+</svg>

@@ -29,6 +29,8 @@ final class MPVPlayer: @unchecked Sendable {
     private let eventQueue = DispatchQueue(label: "com.hankunyu.Yoru.mpv.events", qos: .userInitiated)
     // Guards public API calls against use after `destroy()`.
     private let alive = OSAllocatedUnfairLock(initialState: true)
+    // Custom URL schemes; mpv calls into these until the handle is destroyed.
+    private var streamProtocols: [MPVStreamProtocol] = []
 
     /// Creates and initializes an mpv instance rendering into `layer`.
     ///
@@ -36,7 +38,13 @@ final class MPVPlayer: @unchecked Sendable {
     ///   - layer: The Metal layer mpv's MoltenVK context presents into. The caller keeps it alive.
     ///   - configDirectory: mpv's `config-dir`; `mpv.conf`, `input.conf` and `scripts/` are read from it.
     ///   - options: App defaults applied before the config file, so `mpv.conf` can override any of them.
-    init(layer: CAMetalLayer, configDirectory: URL, options: [(name: String, value: String)]) throws(MPVError) {
+    ///   - streamProtocols: URL schemes served by the app instead of mpv's own stream layer.
+    init(
+        layer: CAMetalLayer,
+        configDirectory: URL,
+        options: [(name: String, value: String)],
+        streamProtocols: [String: MPVStreamOpener] = [:]
+    ) throws(MPVError) {
         guard let handle = mpv_create() else {
             throw MPVError(code: MPV_ERROR_NOMEM.rawValue, context: "mpv_create")
         }
@@ -60,6 +68,9 @@ final class MPVPlayer: @unchecked Sendable {
 
         // On any failure above or here, deinit runs `destroy()` and releases the handle.
         try Self.check(mpv_initialize(handle), "mpv_initialize")
+        self.streamProtocols = streamProtocols.map { scheme, opener in
+            MPVStreamProtocol.register(scheme, opener: opener, on: handle)
+        }
     }
 
     deinit {
@@ -67,8 +78,9 @@ final class MPVPlayer: @unchecked Sendable {
     }
 
     /// Shuts mpv down (equivalent to the `quit` command, so `save-position-on-quit` applies).
-    /// Blocks only the private event queue, never the caller.
-    func destroy() {
+    /// Blocks only the private event queue, never the caller; `completion` runs there once
+    /// mpv is gone.
+    func destroy(completion: (@Sendable () -> Void)? = nil) {
         let wasAlive = alive.withLock { isAlive in
             defer { isAlive = false }
             return isAlive
@@ -76,10 +88,15 @@ final class MPVPlayer: @unchecked Sendable {
         guard wasAlive else { return }
         let handle = handle
         let continuation = continuation
+        let streamProtocols = streamProtocols
         eventQueue.async {
             mpv_set_wakeup_callback(handle, nil, nil)
-            mpv_terminate_destroy(handle)
+            // mpv closes its streams while shutting down, so their protocols must outlive it.
+            withExtendedLifetime(streamProtocols) {
+                mpv_terminate_destroy(handle)
+            }
             continuation.finish()
+            completion?()
         }
     }
 

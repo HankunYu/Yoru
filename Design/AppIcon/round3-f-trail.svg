@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs><filter id="b1" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="60"/></filter>
+<radialGradient id="bg" cx="0.6" cy="0.45" r="0.9">
+  <stop offset="0" stop-color="#0e3038"/><stop offset="0.55" stop-color="#07191f"/><stop offset="1" stop-color="#03090c"/></radialGradient>
+<linearGradient id="moon" x1="0.2" y1="0" x2="0.8" y2="1">
+  <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#c4e4e2"/></linearGradient>
+<linearGradient id="ghost" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#bff3ee"/><stop offset="1" stop-color="#4fb3b0"/></linearGradient></defs>
+
+<rect width="1024" height="1024" fill="url(#bg)"/>
+<circle cx="640" cy="420" r="200" fill="#7fe6de" opacity="0.3" filter="url(#b1)"/>
+<circle cx="296" cy="700" r="96" fill="url(#ghost)" opacity="0.16"/>
+<circle cx="386" cy="610" r="124" fill="url(#ghost)" opacity="0.28"/>
+<circle cx="502" cy="514" r="152" fill="url(#ghost)" opacity="0.5"/>
+<circle cx="640" cy="420" r="180" fill="url(#moon)"/>
+</svg>
