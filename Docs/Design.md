@@ -159,8 +159,15 @@ both choices are app UI state in UserDefaults. One `UICollectionView` serves bot
 - **Thumbnails** come from libmpv itself, since AVFoundation cannot read mkv: `ThumbnailRenderer`
   runs a short-lived offscreen instance (`vo=libmpv`, software render API, software decoding,
   `start=10%`) and reads duration, resolution and transfer function in the same pass.
+- **HDR**: the software renderer leaves pixels in the video's transfer function. PQ is
+  converted by `HDRToneMap` (SDR white at 100 nits, highlights rolled off); Core Graphics'
+  own conversion puts white at 203 nits and looked gray. HLG still goes through Core Graphics.
+- **Placeholders**: files without a thumbnail (everything remote) show a symbol and color
+  for their `MediaKind`, judged by extension, over the extension itself. Subtitles and
+  unknown types are dimmed and do not open.
 - **Cache**: `MediaPreviewStore` keeps a 640x360 JPEG and a JSON of the facts per file in
-  `Library/Caches/Previews`, keyed by path, size and modification date. Generation is serial
+  `Library/Caches/Previews`, keyed by renderer version, container-relative path, size and
+  modification date (the absolute container path changes on every reinstall). Generation is serial
   and suspended while the player is open.
 - **Resume progress**: `WatchHistory` parses `watch_later`; the player sets
   `write-filename-in-watch-later-config` so each entry names its file.

@@ -97,7 +97,12 @@ final class MediaPreviewStore: Sendable {
     private func cacheKey(for url: URL) -> String {
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         let stamp = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
-        let identity = "\(url.path)|\(values?.fileSize ?? 0)|\(stamp)"
+        // Relative to the app's container: its absolute path changes whenever the app is
+        // reinstalled, which would orphan every cached entry.
+        let home = URL.homeDirectory.resolvingSymlinksInPath().path
+        let path = url.resolvingSymlinksInPath().path
+        let stablePath = path.hasPrefix(home) ? String(path.dropFirst(home.count)) : path
+        let identity = "\(ThumbnailRenderer.version)|\(stablePath)|\(values?.fileSize ?? 0)|\(stamp)"
         return SHA256.hash(data: Data(identity.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 

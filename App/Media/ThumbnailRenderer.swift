@@ -9,6 +9,8 @@ import Libmpv
 /// no GPU context, software decoding. Each call owns a fresh instance, so nothing leaks
 /// from one file to the next. Calls block; run them off the main thread.
 enum ThumbnailRenderer {
+    /// Bumped whenever rendering changes in a way that makes cached thumbnails stale.
+    static let version = 2
     static let width = 640
     static let height = 360
 
@@ -126,8 +128,15 @@ enum ThumbnailRenderer {
         guard status >= 0 else { return nil }
 
         // The software renderer only converts YUV to RGB: the pixels keep the video's
-        // transfer function and primaries. Tagging them with that color space and drawing
-        // into sRGB lets Core Graphics do the conversion, including HDR tone mapping.
+        // transfer function and primaries. PQ is converted to sRGB here; anything else is
+        // tagged with its color space and left to Core Graphics.
+        var transfer = transfer
+        var primaries = primaries
+        if transfer == "pq" {
+            HDRToneMap.convertPQToSRGB(buffer, pixelCount: width * height, isBT2020: primaries == "bt.2020")
+            transfer = nil
+            primaries = nil
+        }
         let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
         guard let source = CGColorSpace(name: colorSpaceName(transfer: transfer, primaries: primaries)),
               let provider = CGDataProvider(data: Data(bytes: buffer, count: byteCount) as CFData),
@@ -147,7 +156,6 @@ enum ThumbnailRenderer {
 
     private static func colorSpaceName(transfer: String?, primaries: String?) -> CFString {
         switch transfer {
-        case "pq": CGColorSpace.itur_2100_PQ
         case "hlg": CGColorSpace.itur_2100_HLG
         default: primaries == "bt.2020" ? CGColorSpace.itur_2020 : CGColorSpace.itur_709
         }
