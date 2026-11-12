@@ -8,6 +8,7 @@ import os
 ///
 /// Entries live in the Caches directory, keyed by location, size and modification date, so
 /// a replaced file gets a new thumbnail and the system may reclaim the space at any time.
+/// The store also keeps itself under `diskLimit`, dropping what was shown longest ago.
 final class MediaPreviewStore: Sendable {
     static let shared = MediaPreviewStore()
 
@@ -35,6 +36,81 @@ final class MediaPreviewStore: Sendable {
         memory.countLimit = 300
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         forgetFailuresIfDecodersChanged()
+        queue.addOperation { [self] in trim() }
+    }
+
+    // MARK: - Size limit
+
+    /// The most the cache may take on disk; about ten thousand thumbnails.
+    static let diskLimit: Int64 = 400 << 20
+    /// Entries written between two checks of the size.
+    private static let writesPerTrim = 64
+    /// An entry's date moves when it is shown again, but not more often than this.
+    private static let touchInterval: TimeInterval = 86_400
+    private let writesSinceTrim = OSAllocatedUnfairLock(initialState: 0)
+
+    /// One cached file: a thumbnail or the facts stored beside it, both named by `key`.
+    struct CachedFile {
+        var key: String
+        var size: Int64
+        var lastUse: Date
+    }
+
+    /// The keys to delete so that the files fit `limit`: the least recently used, down
+    /// to a margin below the limit so the next writes do not trigger it again at once.
+    static func keysToEvict(from files: [CachedFile], limit: Int64) -> [String] {
+        var total = files.reduce(0) { $0 + $1.size }
+        guard total > limit else { return [] }
+        var entries: [String: (size: Int64, lastUse: Date)] = [:]
+        for file in files {
+            let entry = entries[file.key]
+            entries[file.key] = (file.size + (entry?.size ?? 0), max(file.lastUse, entry?.lastUse ?? .distantPast))
+        }
+        var evicted: [String] = []
+        for (key, entry) in entries.sorted(by: { ($0.value.lastUse, $0.key) < ($1.value.lastUse, $1.key) }) {
+            guard total > limit * 4 / 5 else { break }
+            total -= entry.size
+            evicted.append(key)
+        }
+        return evicted
+    }
+
+    private func trim() {
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: Array(keys))) ?? []
+        let files = urls.map { url in
+            let values = try? url.resourceValues(forKeys: keys)
+            return CachedFile(
+                key: url.deletingPathExtension().lastPathComponent,
+                size: Int64(values?.fileSize ?? 0),
+                lastUse: values?.contentModificationDate ?? .distantPast
+            )
+        }
+        let evicted = Set(Self.keysToEvict(from: files, limit: Self.diskLimit))
+        guard !evicted.isEmpty else { return }
+        for url in urls where evicted.contains(url.deletingPathExtension().lastPathComponent) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        // Thumbnails still in memory stay usable; their files are made again if needed.
+    }
+
+    private func noteWrite() {
+        let isDue = writesSinceTrim.withLock { count in
+            count += 1
+            guard count >= Self.writesPerTrim else { return false }
+            count = 0
+            return true
+        }
+        if isDue {
+            trim()
+        }
+    }
+
+    /// Marks a cached entry as used now, so trimming spares it.
+    private func touch(_ infoURL: URL) {
+        let modified = (try? infoURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        guard let modified, Date().timeIntervalSince(modified) > Self.touchInterval else { return }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: infoURL.path)
     }
 
     /// Bumped whenever the bundled libmpv gains formats it can decode. Files remembered
@@ -151,6 +227,7 @@ final class MediaPreviewStore: Sendable {
         let preview: MediaPreview
         if let data = try? Data(contentsOf: infoURL), let info = try? JSONDecoder().decode(MediaInfo.self, from: data) {
             preview = MediaPreview(image: UIImage(contentsOfFile: imageURL.path)?.preparingForDisplay(), info: info)
+            touch(infoURL)
         } else {
             let playback = MediaSources.source(for: item.url).playback(of: item.url)
             let rendered = ThumbnailRenderer.render(playback)
@@ -162,6 +239,7 @@ final class MediaPreviewStore: Sendable {
             // may have been the network, and is worth another try.
             if rendered.image != nil || rendered.info.duration != nil || item.url.isFileURL {
                 try? JSONEncoder().encode(rendered.info).write(to: infoURL)
+                noteWrite()
             }
             preview = MediaPreview(image: rendered.image.map { UIImage(cgImage: $0) }, info: rendered.info)
         }

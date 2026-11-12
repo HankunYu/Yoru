@@ -131,3 +131,26 @@ struct TimeEntryTests {
         #expect(PlayerModel.time(from: "-5") == nil)
     }
 }
+
+struct PreviewCacheTests {
+    private func file(_ key: String, _ size: Int64, day: Double) -> MediaPreviewStore.CachedFile {
+        MediaPreviewStore.CachedFile(key: key, size: size, lastUse: Date(timeIntervalSince1970: day * 86_400))
+    }
+
+    @Test func keepsEverythingUnderTheLimit() {
+        let files = [file("a", 40, day: 1), file("b", 60, day: 2)]
+        #expect(MediaPreviewStore.keysToEvict(from: files, limit: 100).isEmpty)
+    }
+
+    @Test func evictsTheLeastRecentlyUsedDownToAMargin() {
+        // Each entry is a thumbnail and its facts; the newer of the two dates counts.
+        let files = [
+            file("old", 30, day: 1), file("old", 2, day: 1),
+            file("shown", 30, day: 1), file("shown", 2, day: 9),
+            file("mid", 30, day: 5), file("mid", 2, day: 5),
+            file("new", 30, day: 8), file("new", 2, day: 8),
+        ]
+        // 128 over a limit of 100: down to at most 80, so the two oldest go.
+        #expect(MediaPreviewStore.keysToEvict(from: files, limit: 100) == ["old", "mid"])
+    }
+}
