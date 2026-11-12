@@ -4,6 +4,8 @@ import Foundation
 struct BrowserItem: Identifiable, Hashable {
     enum Kind: Int {
         case server
+        /// A shortcut to a folder elsewhere; its `url` is that folder's.
+        case bookmark
         case folder
         case file
     }
@@ -14,6 +16,8 @@ struct BrowserItem: Identifiable, Hashable {
     let name: String
     let size: Int?
     let modified: Date?
+    /// Set for a bookmark: which one.
+    var bookmarkID: UUID?
 
     var id: URL { url }
     var isDirectory: Bool { kind != .file }
@@ -30,6 +34,12 @@ struct BrowserItem: Identifiable, Hashable {
         self.modified = modified
     }
 
+    init?(bookmark: Bookmark) {
+        guard let folder = bookmark.folder else { return nil }
+        self.init(url: folder, kind: .bookmark, name: bookmark.name, size: nil, modified: nil)
+        bookmarkID = bookmark.id
+    }
+
     init(server: MediaServer) {
         self.init(url: server.rootURL, kind: .server, name: server.name, size: nil, modified: nil)
     }
@@ -41,7 +51,8 @@ enum BrowserViewMode: String, CaseIterable {
     case list
 }
 
-/// How the browser orders items within each kind. Servers, then folders, always come first.
+/// How the browser orders items within each kind. Servers, bookmarks, then folders always
+/// come first.
 enum BrowserSortOrder: String, CaseIterable {
     case name
     /// Most recently modified first.

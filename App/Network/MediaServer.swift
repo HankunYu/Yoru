@@ -123,6 +123,7 @@ final class ServerStore {
     func remove(_ id: UUID) {
         servers.removeAll { $0.id == id }
         Keychain.setPassword(nil, for: id)
+        BookmarkStore.shared.removeAll(inServer: id)
         SMBSession.invalidate(id)
         save()
     }

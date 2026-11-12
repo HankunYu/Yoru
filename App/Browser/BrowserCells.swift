@@ -5,13 +5,26 @@ struct BrowserCell: View {
     let item: BrowserItem
     let mode: BrowserViewMode
     var isHighlighted = false
+    /// Whether the item is picked for a batch action; nil when nothing is being picked.
+    var isPicked: Bool?
 
     var body: some View {
         Group {
             switch item.kind {
             case .server: ServerCell(item: item, mode: mode)
+            case .bookmark: BookmarkCell(item: item, mode: mode)
             case .folder: FolderCell(item: item, mode: mode)
             case .file: FileCell(item: item, mode: mode)
+            }
+        }
+        .overlay(alignment: mode == .grid ? .topLeading : .trailing) {
+            if let isPicked {
+                Image(systemName: isPicked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22, weight: .medium))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(isPicked ? .black : .white, isPicked ? Theme.accent : .clear)
+                    .shadow(color: .black.opacity(0.5), radius: 3)
+                    .padding(mode == .grid ? 8 : 2)
             }
         }
         .opacity(mode == .grid && isHighlighted ? 0.6 : 1)
@@ -39,7 +52,10 @@ private struct FileCell: View {
                 label: item.url.pathExtension.uppercased(),
                 cornerRadius: mode.coverCornerRadius,
                 progress: progress,
-                badge: mode == .grid ? preview?.info.durationLabel : nil
+                badge: mode == .grid && item.mediaKind != .image ? preview?.info.durationLabel : nil,
+                // Only over a picture: the placeholder already shows the kind's symbol.
+                badgeSymbol: item.mediaKind == .image && preview?.image != nil ? "photo" : nil,
+                compactBadge: mode == .list
             )
         } detail: {
             HStack(spacing: 6) {
@@ -133,6 +149,46 @@ private struct FolderCell: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: covers.count)
+    }
+}
+
+// MARK: - Bookmarks
+
+private struct BookmarkCell: View {
+    let item: BrowserItem
+    let mode: BrowserViewMode
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: mode.coverCornerRadius, style: .continuous)
+        BrowserCellLayout(mode: mode, title: item.title) {
+            LinearGradient(
+                colors: [Theme.accent.opacity(0.22), Theme.card],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .background(Theme.card)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .overlay {
+                Image(systemName: "bookmark.fill")
+                    .font(.system(size: mode == .grid ? 28 : 18))
+                    .foregroundStyle(Theme.accent.opacity(0.9))
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(.white.opacity(0.1), lineWidth: 0.5) }
+        } detail: {
+            Text(location)
+                .lineLimit(1)
+        }
+    }
+
+    /// Where the bookmark leads, as a path a person would recognize.
+    private var location: String {
+        if item.url.isFileURL {
+            let root = URL.documentsDirectory.standardizedFileURL.path
+            return "YORU" + item.url.standardizedFileURL.path.dropFirst(root.count)
+        }
+        guard let (serverID, path) = MediaServer.parse(item.url) else { return "" }
+        return ([ServerStore.shared.server(serverID)?.name ?? ""] + path).joined(separator: "/")
     }
 }
 
@@ -285,6 +341,10 @@ private struct MediaThumbnail: View {
     let cornerRadius: CGFloat
     var progress: Double?
     var badge: String?
+    /// A symbol for the same corner, when there is no text to show.
+    var badgeSymbol: String?
+    /// The thumbnail is small (a list row), so the badge is too.
+    var compactBadge = false
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -323,14 +383,22 @@ private struct MediaThumbnail: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if let badge {
-                    Text(badge)
-                        .font(.caption2.weight(.semibold).monospacedDigit())
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2.5)
-                        .background(.black.opacity(0.6), in: .capsule)
-                        .padding(6)
+                // One corner tells the kinds apart: a video shows its duration there, an
+                // image a picture symbol.
+                Group {
+                    if let badge {
+                        Text(badge)
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                    } else if let badgeSymbol {
+                        Image(systemName: badgeSymbol)
+                            .font(.system(size: compactBadge ? 8 : 10, weight: .semibold))
+                    }
                 }
+                .padding(.horizontal, compactBadge ? 4 : 6)
+                .padding(.vertical, compactBadge ? 2 : 2.5)
+                .background(.black.opacity(0.6), in: .capsule)
+                .padding(compactBadge ? 3 : 6)
+                .opacity(badge == nil && badgeSymbol == nil ? 0 : 1)
             }
             .overlay(alignment: .bottom) {
                 if let progress {

@@ -65,7 +65,7 @@ enum MediaKind {
         "aiff", "aif", "alac", "ac3", "eac3", "dts", "dtshd", "thd", "truehd", "mka", "dsf", "dff", "mpc",
         "amr", "caf", "mid", "midi", "spx", "ra",
     ]
-    private static let imageExtensions: Set<String> = [
-        "jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "jxl",
-    ]
+    // Only what this FFmpeg build can decode. It has the JPEG decoder and no other image
+    // format (no PNG, GIF, WebP, HEIC), so those could be neither shown nor thumbnailed.
+    private static let imageExtensions: Set<String> = ["jpg", "jpeg"]
 }

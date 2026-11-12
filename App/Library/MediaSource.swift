@@ -10,6 +10,8 @@ protocol MediaSource: Sendable {
     func delete(_ item: BrowserItem) throws
     /// How mpv opens the item at `url`.
     func playback(of url: URL) -> PlaybackLocation
+    /// How to copy a file of this source into the local library; nil if it cannot be.
+    func transfer(of item: BrowserItem) -> FileTransfer?
 }
 
 /// What to hand mpv to play an item.
@@ -55,6 +57,32 @@ struct LocalSource: MediaSource {
         PlaybackLocation(location: url.path)
     }
 
+    /// Local files are moved around, not downloaded.
+    func transfer(of item: BrowserItem) -> FileTransfer? { nil }
+
+    func rename(_ item: BrowserItem, to name: String) throws {
+        try FileManager.default.moveItem(at: item.url, to: item.url.deletingLastPathComponent().appending(path: name))
+    }
+
+    func createFolder(named name: String, in directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory.appending(path: name), withIntermediateDirectories: false)
+    }
+
+    /// Moves `items` into `folder`, keeping both when a name is already taken there.
+    func move(_ items: [BrowserItem], into folder: URL) throws {
+        for item in items where item.url.deletingLastPathComponent().standardizedFileURL != folder.standardizedFileURL {
+            try FileManager.default.moveItem(at: item.url, to: FileTransfers.availableURL(for: item.name, in: folder))
+        }
+    }
+
+    /// Every folder of the library below `directory`, depth first, with its depth.
+    static func folders(in directory: URL, depth: Int = 0) -> [(url: URL, depth: Int)] {
+        items(in: directory)
+            .filter { $0.kind == .folder }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .flatMap { [($0.url, depth)] + folders(in: $0.url, depth: depth + 1) }
+    }
+
     /// The visible entries of `directory`, minus the mpv config directory, which is managed
     /// through Settings and the Files app rather than played from.
     static func items(in directory: URL) -> [BrowserItem] {
@@ -91,6 +119,23 @@ struct SMBSource: MediaSource {
     /// mpv opens the browser URL itself, through `openStream`.
     func playback(of url: URL) -> PlaybackLocation {
         PlaybackLocation(location: url.absoluteString, forcesCache: true)
+    }
+
+    func transfer(of item: BrowserItem) -> FileTransfer? {
+        guard item.kind == .file, let (serverID, path) = MediaServer.parse(item.url) else { return nil }
+        return FileTransfer(name: item.name, totalBytes: Int64(item.size ?? 0)) { destination, progress in
+            guard let credentials = SMBCredentials(serverID: serverID) else { throw SMBError(code: ENOENT) }
+            let stream = try SMBStream(credentials: credentials, path: path)
+            defer { stream.close() }
+            let chunkSize = 1 << 20
+            let buffer = UnsafeMutableRawPointer.allocate(byteCount: chunkSize, alignment: 16)
+            defer { buffer.deallocate() }
+            try FileTransfer.write(to: destination, progress: progress) {
+                let count = stream.read(into: buffer, count: chunkSize)
+                guard count >= 0 else { throw SMBError(code: EIO) }
+                return Data(bytes: buffer, count: count)
+            }
+        }
     }
 
     func contents(of directory: URL) async throws -> [BrowserItem] {
@@ -152,6 +197,14 @@ struct WebDAVSource: MediaSource {
 
     func delete(_ item: BrowserItem) throws {
         throw WebDAVError(reason: .status(405))
+    }
+
+    func transfer(of item: BrowserItem) -> FileTransfer? {
+        guard item.kind == .file, let (serverID, path) = MediaServer.parse(item.url) else { return nil }
+        return FileTransfer(name: item.name, totalBytes: Int64(item.size ?? 0)) { destination, progress in
+            guard let client = WebDAVClient(serverID: serverID) else { throw WebDAVError(reason: .notFound) }
+            try await client.download(path, to: destination, progress: progress)
+        }
     }
 
     func playback(of url: URL) -> PlaybackLocation {

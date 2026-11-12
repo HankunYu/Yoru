@@ -100,6 +100,37 @@ struct WebDAVClient: Sendable {
         return WebDAVListing.parse(data).filter { Self.normalized($0.path) != ownPath }.map(\.entry)
     }
 
+    /// Downloads the file at `path` to `destination`, reporting bytes written so far.
+    func download(_ path: [String], to destination: URL, progress: @Sendable (Int64) -> Void) async throws {
+        guard let url = url(for: path) else { throw WebDAVError(reason: .invalidAddress) }
+        var request = URLRequest(url: url)
+        if let authorization {
+            request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        }
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw WebDAVError(reason: status == 401 || status == 403 ? .unauthorized : .status(status))
+        }
+        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        let output = try FileHandle(forWritingTo: destination)
+        defer { try? output.close() }
+        // The sequence yields single bytes; they are gathered into megabyte writes.
+        var buffer = Data(capacity: 1 << 20)
+        var written: Int64 = 0
+        for try await byte in bytes {
+            buffer.append(byte)
+            if buffer.count >= 1 << 20 {
+                try output.write(contentsOf: buffer)
+                written += Int64(buffer.count)
+                buffer.removeAll(keepingCapacity: true)
+                progress(written)
+            }
+        }
+        try output.write(contentsOf: buffer)
+        progress(written + Int64(buffer.count))
+    }
+
     private static func normalized(_ path: String) -> String {
         path.hasSuffix("/") ? String(path.dropLast()) : path
     }

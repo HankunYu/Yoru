@@ -7,17 +7,29 @@ import UIKit
 /// state-aware row background wholesale, so rows could not be clear at rest yet show a
 /// fill while swiped or pressed. One collection view also serves both layouts, switching
 /// between them in place.
+/// An entry of an item's long-press menu.
+struct BrowserAction {
+    let title: String
+    let symbol: String
+    var isDestructive = false
+    let perform: () -> Void
+}
+
 struct BrowserList: UIViewRepresentable {
     let items: [BrowserItem]
     let mode: BrowserViewMode
+    /// Non-nil while items are being picked for a batch action: the picked ones. A tap then
+    /// picks instead of opening.
+    let selection: Set<URL>?
+    /// Whether swiping a row deletes it.
     let canDelete: (BrowserItem) -> Bool
     let onSelect: (BrowserItem) -> Void
     let onDelete: (BrowserItem) -> Void
-    /// Offered for servers, from the long-press menu.
-    let onEdit: (BrowserItem) -> Void
+    /// The long-press menu of an item; empty for none.
+    let actions: (BrowserItem) -> [BrowserAction]
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(mode: mode, canDelete: canDelete, onSelect: onSelect, onDelete: onDelete, onEdit: onEdit)
+        Coordinator(mode: mode, canDelete: canDelete, onSelect: onSelect, onDelete: onDelete, actions: actions)
     }
 
     func makeUIView(context: Context) -> UICollectionView {
@@ -36,7 +48,8 @@ struct BrowserList: UIViewRepresentable {
         context.coordinator.canDelete = canDelete
         context.coordinator.onSelect = onSelect
         context.coordinator.onDelete = onDelete
-        context.coordinator.onEdit = onEdit
+        context.coordinator.actions = actions
+        context.coordinator.setSelection(selection)
         context.coordinator.apply(items, mode: mode)
     }
 
@@ -45,7 +58,8 @@ struct BrowserList: UIViewRepresentable {
         var canDelete: (BrowserItem) -> Bool
         var onSelect: (BrowserItem) -> Void
         var onDelete: (BrowserItem) -> Void
-        var onEdit: (BrowserItem) -> Void
+        var actions: (BrowserItem) -> [BrowserAction]
+        private var selection: Set<URL>?
         private var mode: BrowserViewMode
         private weak var collectionView: UICollectionView?
         private var dataSource: UICollectionViewDiffableDataSource<Int, BrowserItem>?
@@ -64,23 +78,38 @@ struct BrowserList: UIViewRepresentable {
             canDelete: @escaping (BrowserItem) -> Bool,
             onSelect: @escaping (BrowserItem) -> Void,
             onDelete: @escaping (BrowserItem) -> Void,
-            onEdit: @escaping (BrowserItem) -> Void
+            actions: @escaping (BrowserItem) -> [BrowserAction]
         ) {
             self.mode = mode
             self.canDelete = canDelete
             self.onSelect = onSelect
             self.onDelete = onDelete
-            self.onEdit = onEdit
+            self.actions = actions
+        }
+
+        /// Whether `item` is picked; nil when nothing is being picked.
+        private func isPicked(_ item: BrowserItem) -> Bool? {
+            selection.map { $0.contains(item.url) }
+        }
+
+        func setSelection(_ selection: Set<URL>?) {
+            guard selection != self.selection, let dataSource else { return }
+            self.selection = selection
+            // Every cell shows or hides its mark, so all are rebuilt in place.
+            var snapshot = dataSource.snapshot()
+            snapshot.reconfigureItems(snapshot.itemIdentifiers)
+            dataSource.apply(snapshot, animatingDifferences: false)
         }
 
         func attach(to collectionView: UICollectionView) {
             self.collectionView = collectionView
 
-            let listCell = UICollectionView.CellRegistration<UICollectionViewListCell, BrowserItem> { cell, _, item in
+            let listCell = UICollectionView.CellRegistration<UICollectionViewListCell, BrowserItem> { [weak self] cell, _, item in
+                let isPicked = self?.isPicked(item)
                 cell.contentConfiguration = UIHostingConfiguration {
-                    BrowserCell(item: item, mode: .list)
+                    BrowserCell(item: item, mode: .list, isPicked: isPicked)
                 }
-                cell.accessories = item.isDirectory ? [.disclosureIndicator()] : []
+                cell.accessories = item.isDirectory && isPicked == nil ? [.disclosureIndicator()] : []
                 cell.configurationUpdateHandler = { cell, state in
                     var background = UIBackgroundConfiguration.listCell().updated(for: state)
                     // Clear at rest; a soft fill while swiped, pressed or selected.
@@ -89,10 +118,11 @@ struct BrowserList: UIViewRepresentable {
                     cell.backgroundConfiguration = background
                 }
             }
-            let gridCell = UICollectionView.CellRegistration<UICollectionViewCell, BrowserItem> { cell, _, item in
+            let gridCell = UICollectionView.CellRegistration<UICollectionViewCell, BrowserItem> { [weak self] cell, _, item in
+                let isPicked = self?.isPicked(item)
                 cell.configurationUpdateHandler = { cell, state in
                     cell.contentConfiguration = UIHostingConfiguration {
-                        BrowserCell(item: item, mode: .grid, isHighlighted: state.isHighlighted)
+                        BrowserCell(item: item, mode: .grid, isHighlighted: state.isHighlighted, isPicked: isPicked)
                     }
                     .margins(.all, 0)
                 }
@@ -169,7 +199,9 @@ struct BrowserList: UIViewRepresentable {
         // MARK: Actions
 
         private func swipeActions(at indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-            guard let item = dataSource?.itemIdentifier(for: indexPath), canDelete(item) else { return nil }
+            guard selection == nil, let item = dataSource?.itemIdentifier(for: indexPath), canDelete(item) else {
+                return nil
+            }
             let delete = UIContextualAction(style: .destructive, title: String(localized: "Delete")) { [weak self] _, _, completion in
                 self?.onDelete(item)
                 completion(true)
@@ -190,29 +222,22 @@ struct BrowserList: UIViewRepresentable {
             contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
             point: CGPoint
         ) -> UIContextMenuConfiguration? {
-            guard let indexPath = indexPaths.first, let item = dataSource?.itemIdentifier(for: indexPath) else {
+            guard selection == nil, let indexPath = indexPaths.first,
+                  let item = dataSource?.itemIdentifier(for: indexPath) else {
                 return nil
             }
-            let isServer = item.kind == .server
-            let isDeletable = canDelete(item)
-            guard isServer || isDeletable else { return nil }
-            return UIContextMenuConfiguration(actionProvider: { [weak self] _ in
-                var actions: [UIAction] = []
-                if isServer {
-                    actions.append(UIAction(title: String(localized: "Edit"), image: UIImage(systemName: "pencil")) { _ in
-                        self?.onEdit(item)
-                    })
-                }
-                if isDeletable {
-                    actions.append(UIAction(
-                        title: String(localized: "Delete"),
-                        image: UIImage(systemName: "trash"),
-                        attributes: .destructive
+            let actions = actions(item)
+            guard !actions.isEmpty else { return nil }
+            return UIContextMenuConfiguration(actionProvider: { _ in
+                UIMenu(children: actions.map { action in
+                    UIAction(
+                        title: action.title,
+                        image: UIImage(systemName: action.symbol),
+                        attributes: action.isDestructive ? .destructive : []
                     ) { _ in
-                        self?.onDelete(item)
-                    })
-                }
-                return UIMenu(children: actions)
+                        action.perform()
+                    }
+                })
             })
         }
     }

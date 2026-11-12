@@ -40,6 +40,7 @@ struct YoruApp: App {
 struct RootView: View {
     @State private var playing: PlaybackTarget?
     @State private var path: [BrowserItem] = []
+    private let transfers = FileTransfers.shared
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -47,6 +48,22 @@ struct RootView: View {
                 .navigationDestination(for: BrowserItem.self) { item in
                     BrowserView(directory: item.url, playing: $playing, path: $path)
                 }
+        }
+        // Transfers outlive the screen that started them, so their progress shows here.
+        .overlay(alignment: .bottom) {
+            if let progress = transfers.progress {
+                TransferProgressBar(progress: progress, onCancel: transfers.cancel)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.snappy(duration: 0.25), value: transfers.isActive)
+        .alert("Transfer Failed", isPresented: Binding(
+            get: { transfers.errorMessage != nil },
+            set: { if !$0 { transfers.dismissError() } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(transfers.errorMessage ?? "")
         }
         // Files opened from other apps (Files, share sheet) arrive here and play in place.
         .onOpenURL { url in
