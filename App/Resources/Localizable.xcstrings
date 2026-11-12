@@ -3940,34 +3940,6 @@
         }
       }
     },
-    "Enter the address of a video or stream. Supported: http, https (including HLS and DASH streams), ftp, rtsp and rtmp.": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "输入视频或直播流的地址。支持 http、https（包括 HLS 和 DASH 流）、ftp、rtsp 和 rtmp。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "輸入影片或串流的網址。支援 http、https（包括 HLS 和 DASH 串流）、ftp、rtsp 和 rtmp。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ビデオまたはストリームのアドレスを入力してください。対応：http、https（HLSとDASHストリームを含む）、ftp、rtsp、rtmp。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "비디오 또는 스트림의 주소를 입력하십시오. 지원: http, https(HLS 및 DASH 스트림 포함), ftp, rtsp, rtmp."
-          }
-        }
-      }
-    },
     "URL": {
       "localizations": {
         "zh-Hans": {
@@ -6054,6 +6026,34 @@
           "stringUnit": {
             "state": "translated",
             "value": "디스플레이 및 렌더링 상태를 보여주는 오버레이를 플레이어 메뉴에 추가합니다. 문제 해결용입니다."
+          }
+        }
+      }
+    },
+    "Enter the address of a video or stream. Supported: http, https (including HLS and DASH streams), ftp, rtsp, rtmp and smb.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入视频或直播流的地址。支持 http、https（包括 HLS 和 DASH 流）、ftp、rtsp、rtmp 和 smb。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "輸入影片或串流的網址。支援 http、https（包括 HLS 和 DASH 串流）、ftp、rtsp、rtmp 和 smb。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ビデオまたはストリームのアドレスを入力してください。対応：http、https（HLSとDASHストリームを含む）、ftp、rtsp、rtmp、smb。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "비디오 또는 스트림의 주소를 입력하십시오. 지원: http, https(HLS 및 DASH 스트림 포함), ftp, rtsp, rtmp, smb."
           }
         }
       }

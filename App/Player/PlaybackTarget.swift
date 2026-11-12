@@ -58,7 +58,8 @@ struct PlaybackTarget: Identifiable {
     init(location: String) {
         self.location = location
         externalSubtitles = []
-        forcesCache = false
+        // An smb:// link is served by the app, so mpv does not see it as a network source.
+        forcesCache = location.lowercased().hasPrefix(SMBSource.linkScheme + "://")
         httpHeaders = []
         initialSubtitleChoice = nil
         itemURL = nil

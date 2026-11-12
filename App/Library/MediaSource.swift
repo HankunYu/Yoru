@@ -37,6 +37,10 @@ enum MediaSources {
     /// The URL schemes the app serves to mpv itself.
     static let streamProtocols: [String: MPVStreamOpener] = [
         MediaServer.Kind.smb.scheme: SMBSource.openStream,
+        // Plain smb:// links too. mpv could open them itself, but through the same
+        // libsmbclient and outside the lock every other use of it takes, which crashes
+        // when the two run at once. Registered here they take precedence over mpv's own.
+        SMBSource.linkScheme: SMBSource.openLink,
     ]
 }
 
@@ -156,6 +160,33 @@ struct SMBSource: MediaSource {
 
     func delete(_ item: BrowserItem) throws {
         throw SMBError(code: ENOTSUP)
+    }
+
+    static let linkScheme = "smb"
+
+    /// Takes an `smb://[user[:password]@]host[:port]/share/path` link apart.
+    static func parseLink(_ link: String) -> (credentials: SMBCredentials, path: [String])? {
+        guard let components = URLComponents(string: link), components.scheme?.lowercased() == linkScheme,
+              let host = components.host, !host.isEmpty else { return nil }
+        let path = components.path.split(separator: "/").map(String.init)
+        // A link to a server or a share names no file.
+        guard path.count >= 2 else { return nil }
+        let address = components.port.map { "\(host):\($0)" } ?? host
+        let credentials = SMBCredentials(
+            host: address, username: components.user ?? "", password: components.password ?? ""
+        )
+        return (credentials, path)
+    }
+
+    /// Opens a pasted smb:// link for mpv. Runs on an mpv thread.
+    static let openLink: MPVStreamOpener = { location in
+        guard let (credentials, path) = parseLink(location) else { return nil }
+        do {
+            return try SMBStream(credentials: credentials, path: path)
+        } catch {
+            Log.app.error("Opening an SMB link failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     /// Opens a file for mpv. Runs on an mpv thread.

@@ -235,7 +235,7 @@ struct BrowserView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Enter the address of a video or stream. Supported: http, https (including HLS and DASH streams), ftp, rtsp and rtmp.")
+            Text("Enter the address of a video or stream. Supported: http, https (including HLS and DASH streams), ftp, rtsp, rtmp and smb.")
         }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             importFiles(result)

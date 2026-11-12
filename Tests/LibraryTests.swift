@@ -202,3 +202,27 @@ struct WebDAVListingTests {
         #expect(items[2].path == "/dav/Anime/测试 #1.mkv")
     }
 }
+
+struct SMBLinkTests {
+    @Test func takesALinkApart() throws {
+        let link = "smb://me:p%40ss@nas.local/Films/2021/%E7%94%B5%E5%BD%B1%20%231.mkv"
+        let parsed = try #require(SMBSource.parseLink(link))
+        #expect(parsed.credentials.host == "nas.local")
+        #expect(parsed.credentials.username == "me")
+        #expect(parsed.credentials.password == "p@ss")
+        #expect(parsed.path == ["Films", "2021", "电影 #1.mkv"])
+    }
+
+    @Test func keepsThePortAndAllowsGuests() throws {
+        let parsed = try #require(SMBSource.parseLink("SMB://192.168.1.2:4455/share/a.mkv"))
+        #expect(parsed.credentials.host == "192.168.1.2:4455")
+        #expect(parsed.credentials.username == "")
+        #expect(parsed.path == ["share", "a.mkv"])
+    }
+
+    @Test func rejectsLinksThatNameNoFile() {
+        #expect(SMBSource.parseLink("smb://nas.local/") == nil)
+        #expect(SMBSource.parseLink("smb://nas.local/share") == nil)
+        #expect(SMBSource.parseLink("https://nas.local/share/a.mkv") == nil)
+    }
+}
