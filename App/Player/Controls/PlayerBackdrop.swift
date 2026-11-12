@@ -22,7 +22,7 @@ struct PlayerBackdrop: View {
                         .tint(.white)
                     // How fast the source is delivering, so a stall can be told from a slow
                     // link. Local files open without reading through a measured stream.
-                    if model.transferSpeed > 0 || model.isBuffering {
+                    if model.showsTransferSpeed {
                         Text(verbatim: "\(Int64(model.transferSpeed).formatted(.byteCount(style: .binary)))/s")
                             .font(.footnote.weight(.semibold).monospacedDigit())
                             .foregroundStyle(.white)

@@ -115,6 +115,11 @@ final class PlayerModel {
     var isWaiting: Bool { isLoading || isBuffering }
     /// The rate data is arriving at while waiting; 0 when unknown.
     var transferSpeed: Int { max(cacheSpeed, streamSpeed) }
+    /// Whether a rate is worth showing for the current wait: there is one from mpv's cache,
+    /// or app-served streams have delivered something. Once shown it stays, reading zero
+    /// during a stall rather than vanishing.
+    var showsTransferSpeed: Bool { isBuffering || hasMeasuredStreamSpeed }
+    private var hasMeasuredStreamSpeed = false
     /// The time up to which the file is buffered ahead of the playback position.
     private(set) var bufferedEnd: Double = 0
     private(set) var isIdle = true
@@ -254,6 +259,7 @@ final class PlayerModel {
             speedSamplingTask?.cancel()
             speedSamplingTask = nil
             streamSpeed = 0
+            hasMeasuredStreamSpeed = false
             return
         }
         guard speedSamplingTask == nil else { return }
@@ -263,7 +269,14 @@ final class PlayerModel {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
                 let now = MPVStreamMeter.bytesRead
-                self?.streamSpeed = Int(now - last) * 2
+                guard let self else { return }
+                // Averaged with the previous reading: opening a file reads in bursts, and
+                // raw half-second samples jump between a real rate and zero.
+                let sample = Int(now - last) * 2
+                streamSpeed = hasMeasuredStreamSpeed ? (streamSpeed + sample) / 2 : sample
+                if sample > 0 {
+                    hasMeasuredStreamSpeed = true
+                }
                 last = now
             }
         }
