@@ -70,7 +70,7 @@ struct PlayerBackdrop: View {
     }
 
     private var diagnostics: some View {
-        let lines = PlayerModel.diagnosticProperties.map { "\($0): \(model.diagnostics[$0] ?? "-")" }
+        let lines = PlayerModel.shownDiagnostics.map { "\($0): \(model.property($0) ?? "-")" }
             + environmentLines()
         return Text(lines.joined(separator: "\n"))
             .font(.system(size: 11, design: .monospaced))

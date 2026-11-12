@@ -50,11 +50,17 @@ struct PlaybackMenu: View {
 
     var body: some View {
         Menu {
-            Button("Statistics", systemImage: "chart.bar.xaxis") { model.toggleStats() }
-            Toggle("Diagnostics", systemImage: "stethoscope", isOn: Binding(
-                get: { model.showsDiagnostics },
-                set: { model.showsDiagnostics = $0 }
+            Button("File Info", systemImage: "info.circle") { model.showInfo() }
+            Toggle("Statistics", systemImage: "chart.bar.xaxis", isOn: Binding(
+                get: { model.showsStats },
+                set: { _ in model.toggleStats() }
             ))
+            if model.offersDiagnostics {
+                Toggle("Diagnostics", systemImage: "stethoscope", isOn: Binding(
+                    get: { model.showsDiagnostics },
+                    set: { model.showsDiagnostics = $0 }
+                ))
+            }
         } label: {
             Label("More", systemImage: "ellipsis")
         }

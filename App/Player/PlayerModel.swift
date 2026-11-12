@@ -114,6 +114,8 @@ enum SidePanelContent {
     case adjustments
     /// The playlist and the chapters: where to go, rather than how it looks.
     case contents
+    /// What the file is: container, codecs, formats.
+    case info
 }
 
 /// How the picture is fitted to the screen.
@@ -211,6 +213,9 @@ final class PlayerModel {
     private(set) var hasDedicatedControlArea = false
     private(set) var osd: OSDMessage?
     var showsDiagnostics = false
+    private(set) var showsStats = false
+    /// Whether the menu offers the diagnostics overlay at all; a setting, off by default.
+    let offersDiagnostics = YoruOptions.load().diagnostics
     /// Raw string values of observed diagnostic properties.
     private(set) var diagnostics: [String: String] = [:]
     private(set) var errorMessage: String?
@@ -230,6 +235,21 @@ final class PlayerModel {
     private var awaitsInitialSubtitleChoice = false
 
     static let speeds: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
+    /// Properties behind the file info panel, kept as mpv prints them.
+    static let infoProperties = [
+        "filename", "file-format", "file-size",
+        "video-codec", "video-params/w", "video-params/h", "video-params/pixelformat",
+        "video-params/primaries", "video-params/gamma", "video-params/colormatrix",
+        "video-params/colorlevels", "container-fps",
+        "audio-codec", "audio-params/samplerate", "audio-params/hr-channels", "audio-params/format",
+        "audio-bitrate",
+    ]
+    /// The observed properties the diagnostics overlay lists: how playback is going, as
+    /// opposed to what the file is, which the file info panel covers.
+    static let shownDiagnostics = [
+        "hwdec-current", "video-out-params/w", "video-out-params/h",
+        "estimated-vf-fps", "frame-drop-count", "decoder-frame-drop-count",
+    ]
     static let diagnosticProperties = [
         "hwdec-current",
         "video-params/gamma",
@@ -295,7 +315,7 @@ final class PlayerModel {
         player.observe("secondary-sid", format: .string)
         player.observe("chapter-list", format: .node)
         player.observe("chapter", format: .int)
-        for name in Self.diagnosticProperties {
+        for name in Self.diagnosticProperties + Self.infoProperties {
             player.observe(name, format: .string)
         }
         scheduleControlsHide()
@@ -488,7 +508,10 @@ final class PlayerModel {
     }
 
     /// Toggles mpv's built-in stats overlay (a Lua script).
+    /// Shows or hides mpv's statistics overlay. mpv's script keeps the state to itself, so
+    /// it is mirrored here; both start hidden with each player.
     func toggleStats() {
+        showsStats.toggle()
         player?.command("script-binding", "stats/display-stats-toggle")
     }
 
@@ -576,6 +599,37 @@ final class PlayerModel {
     func showContents() {
         sidePanelContent = .contents
         showsAdjustments = true
+    }
+
+    func showInfo() {
+        sidePanelContent = .info
+        showsAdjustments = true
+    }
+
+    /// The value of an observed diagnostic or info property as mpv prints it; nil while
+    /// unknown or not applicable to the file.
+    func property(_ name: String) -> String? {
+        guard let value = diagnostics[name], !value.isEmpty, value != "-" else { return nil }
+        return value
+    }
+
+    /// Jumps to an absolute position, exactly.
+    func seek(toTime time: Double) {
+        guard duration > 0 else { return }
+        player?.command("seek", String(min(max(time, 0), duration)), "absolute+exact")
+        keepControlsVisible()
+    }
+
+    /// Reads a typed time: seconds, `m:ss` or `h:mm:ss`. Nil if it is not one.
+    nonisolated static func time(from text: String) -> Double? {
+        let parts = text.trimmingCharacters(in: .whitespaces).split(separator: ":", omittingEmptySubsequences: false)
+        guard (1...3).contains(parts.count) else { return nil }
+        var total = 0.0
+        for part in parts {
+            guard let value = Double(part), value >= 0 else { return nil }
+            total = total * 60 + value
+        }
+        return total
     }
 
     func hideAdjustments() {

@@ -31,6 +31,8 @@ struct YoruOptions: Equatable {
     var endAction = EndAction.next
     /// Make thumbnails for videos on servers, not just local ones.
     var remoteThumbnails = true
+    /// Offer the diagnostics overlay (layer, display and fold state) in the player's menu.
+    var diagnostics = false
 
     static let fileURL = ConfigDirectory.url.appending(path: "script-opts/yoru.conf")
 
@@ -61,6 +63,9 @@ struct YoruOptions: Equatable {
         if let value = file.value(for: "remote-thumbnails") {
             options.remoteThumbnails = value != "no"
         }
+        if let value = file.value(for: "diagnostics") {
+            options.diagnostics = value == "yes"
+        }
         if let value = file.value(for: "at-end"), let action = EndAction(rawValue: value) {
             options.endAction = action
         }
@@ -78,6 +83,7 @@ struct YoruOptions: Equatable {
         file.set("hold-speed", to: String(format: "%g", holdSpeed))
         file.set("at-end", to: endAction.rawValue)
         file.set("remote-thumbnails", to: Self.flag(remoteThumbnails))
+        file.set("diagnostics", to: Self.flag(diagnostics))
         file.save()
     }
 

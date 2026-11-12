@@ -18,6 +18,7 @@ struct SidePanel: View {
             switch model.sidePanelContent {
             case .adjustments: AdjustmentPanel(model: model)
             case .contents: ContentsPanel(model: model)
+            case .info: InfoPanel(model: model)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -323,6 +324,8 @@ private struct PictureAdjustments: View {
 
 private struct PlaybackAdjustments: View {
     let model: PlayerModel
+    @State private var isEnteringTime = false
+    @State private var enteredTime = ""
 
     var body: some View {
         SliderRow(
@@ -334,6 +337,25 @@ private struct PlaybackAdjustments: View {
         )
         Button("Normal Speed") { model.setSpeed(1) }
             .buttonStyle(PanelButtonStyle())
+        Row(title: "Jump to Time") {
+            Button(PlayerModel.format(time: model.position)) {
+                enteredTime = ""
+                isEnteringTime = true
+            }
+            .buttonStyle(PanelButtonStyle())
+        }
+        .alert("Jump to Time", isPresented: $isEnteringTime) {
+            TextField("Time", text: $enteredTime, prompt: Text(verbatim: "1:23:45"))
+                .keyboardType(.numbersAndPunctuation)
+            Button("Jump") {
+                if let time = PlayerModel.time(from: enteredTime) {
+                    model.seek(toTime: time)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Seconds, minutes:seconds or hours:minutes:seconds.")
+        }
         VStack(alignment: .leading, spacing: 10) {
             Text("A-B Loop")
                 .font(.subheadline.weight(.medium))

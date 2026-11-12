@@ -82,6 +82,13 @@ struct SettingsView: View {
         Section {
             LabeledContent("Version", value: Self.version)
             LabeledContent("Player Core", value: "mpv")
+            Toggle(isOn: $interface.diagnostics) {
+                SettingLabel(
+                    "Diagnostics",
+                    detail: "Adds an overlay to the player's menu showing the display and rendering state, for troubleshooting.",
+                    symbol: "stethoscope"
+                )
+            }
         } header: {
             Text("About")
         }
