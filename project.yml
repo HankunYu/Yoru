@@ -25,6 +25,9 @@ targets:
       - path: App
         excludes:
           - Resources/DefaultConfig
+          - Resources/Bundled
+      - path: App/Resources/Bundled
+        buildPhase: resources
       # Shipped as a folder so it can be copied verbatim into Documents/mpv on first launch.
       - path: App/Resources/DefaultConfig
         type: folder
@@ -38,18 +41,19 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_FILE: App/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
     info:
       path: App/Resources/Info.plist
       properties:
-        CFBundleDisplayName: Yoru
+        CFBundleDisplayName: YORU
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UIBackgroundModes: [audio]
-        NSLocalNetworkUsageDescription: Yoru plays media from servers on your local network.
+        NSLocalNetworkUsageDescription: YORU plays media from servers on your local network.
         CFBundleDocumentTypes:
           - CFBundleTypeName: Media
             CFBundleTypeRole: Viewer

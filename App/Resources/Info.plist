@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Yoru</string>
+	<string>YORU</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -60,7 +60,7 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Yoru plays media from servers on your local network.</string>
+	<string>YORU plays media from servers on your local network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -10,7 +10,9 @@ enum ConfigDirectory {
     private static let subdirectories = ["scripts", "script-opts", "fonts", "watch_later"]
     // The bundled CJK font lives in `fonts/` like any user font: iOS sandboxing keeps libass
     // from opening system fonts (PingFang etc.), so without it CJK subtitles have no glyphs.
-    private static let defaultFiles = ["mpv.conf", "input.conf", "fonts/NotoSansCJKsc-Regular.otf"]
+    private static let defaultFiles = [
+        "mpv.conf", "input.conf", "script-opts/yoru.conf", "fonts/NotoSansCJKsc-Regular.otf",
+    ]
 
     /// Creates the directory tree and copies bundled defaults for files that don't exist yet.
     /// Existing user files are never overwritten.

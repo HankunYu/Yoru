@@ -1,37 +1,28 @@
+import SwiftUI
 import UIKit
 
-/// Full-screen player: owns one `MPVPlayer`, the render view, the minimal control overlay
-/// and the iOS lifecycle glue (background audio, foldable posture).
-///
-/// M0 spike: the overlay also shows a diagnostics panel used to verify rendering,
-/// hardware decoding, HDR and the iPhone Duo fold on device.
+/// Full-screen player. Owns one `MPVPlayer` and its render view, and composes the pieces
+/// around it: touch input, the SwiftUI controls, lock screen integration, and the iOS
+/// lifecycle glue (background audio, foldable posture).
 final class PlayerViewController: UIViewController {
-    var onClose: (() -> Void)?
-
     private let location: String
+    private let model = PlayerModel()
     private let playerView = PlayerView()
-    // Taps outside the controls fall through to the player view's tap recognizer.
-    private let overlay = PassthroughView()
-    private let diagnosticsLabel = UILabel()
-    private let timeLabel = UILabel()
-    private let seekSlider = UISlider()
-    private lazy var playPauseButton = makeButton(systemImage: "pause.fill") { [weak self] in
-        self?.player?.command("cycle", "pause")
-    }
 
     private var player: MPVPlayer?
     private var eventTask: Task<Void, Never>?
+    private var touchInput: TouchInput?
     private var postureMonitor: PostureMonitor?
+    private var nowPlaying: NowPlayingSession?
+    private var controlHosts: [UIView] = []
     private var savedVideoTrack = "auto"
+    private var currentVideoTrack: String?
+    private var edrHeadroom: CGFloat = 1
 
-    private var isPaused = false
-    private var timePosition: Double = 0
-    private var duration: Double = 0
-    private var properties: [String: String] = [:]
-
-    init(location: String) {
+    init(location: String, onClose: @escaping () -> Void) {
         self.location = location
         super.init(nibName: nil, bundle: nil)
+        model.onClose = onClose
     }
 
     @available(*, unavailable)
@@ -45,21 +36,30 @@ final class PlayerViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        overrideUserInterfaceStyle = .dark
         buildViewHierarchy()
+
+        touchInput = TouchInput(
+            view: playerView,
+            send: { [weak self] key in self?.player?.command("keypress", key.rawValue) },
+            scrub: { [weak self] scrub in self?.model.handle(scrub) }
+        )
 
         let monitor = PostureMonitor(view: playerView)
         monitor.onChange = { [weak self] posture in self?.apply(posture) }
-        monitor.onUpdate = { [weak self] in self?.updateDiagnostics() }
         postureMonitor = monitor
         // Driven by the player view's own layout pass, which runs after the controller's.
         playerView.onLayout = { [weak self] in
             self?.syncSurfaceSize()
             self?.postureMonitor?.invalidate()
-            self?.updateDiagnostics()
         }
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(toggleOverlay))
-        playerView.addGestureRecognizer(tap)
+        model.adjustBrightness = { [weak self] delta in
+            guard let screen = self?.view.window?.windowScene?.screen else { return 0 }
+            screen.brightness = min(max(screen.brightness + delta, 0), 1)
+            return screen.brightness
+        }
+        trackControlsVisibility()
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(appDidEnterBackground),
@@ -80,7 +80,6 @@ final class PlayerViewController: UIViewController {
         }
     }
 
-
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isBeingDismissed || parent?.isBeingDismissed == true {
@@ -91,7 +90,7 @@ final class PlayerViewController: UIViewController {
     // MARK: - Player lifecycle
 
     private func startPlayer() {
-        let edrHeadroom = view.window?.windowScene?.screen.potentialEDRHeadroom ?? 1
+        edrHeadroom = view.window?.windowScene?.screen.potentialEDRHeadroom ?? 1
         var options: [(name: String, value: String)] = [
             ("vo", "gpu-next"),
             ("gpu-api", "vulkan"),
@@ -103,6 +102,7 @@ final class PlayerViewController: UIViewController {
             ("watch-later-dir", ConfigDirectory.url.appending(path: "watch_later").path),
             // Default and fallback subtitle font; see ConfigDirectory for why it is bundled.
             ("sub-font", "Noto Sans CJK SC"),
+            ("osd-font", "Noto Sans CJK SC"),
         ]
         // target-colorspace-hint cannot change at runtime and moltenvk does not report the
         // display, so the app decides up front from the screen's EDR capability.
@@ -112,7 +112,6 @@ final class PlayerViewController: UIViewController {
         #if DEBUG
         options.append(("log-file", ConfigDirectory.url.appending(path: "mpv.log").path))
         #endif
-        properties["edr-headroom"] = String(format: "%.2f", edrHeadroom)
 
         do {
             let player = try MPVPlayer(
@@ -122,7 +121,11 @@ final class PlayerViewController: UIViewController {
             )
             self.player = player
             syncSurfaceSize()
-            observeProperties(of: player)
+            loadTouchBindings(into: player)
+            model.attach(player)
+            // Cached so the background handler can restore it without a synchronous read.
+            player.observe("vid", format: .string)
+            nowPlaying = NowPlayingSession(model: model)
             eventTask = Task { [weak self] in
                 for await event in player.events {
                     self?.handle(event)
@@ -131,9 +134,30 @@ final class PlayerViewController: UIViewController {
             player.command("loadfile", location)
         } catch {
             Log.player.error("Starting mpv failed: \(error.description, privacy: .public)")
-            properties["error"] = error.description
-            updateDiagnostics()
+            model.report(error: error.description)
         }
+    }
+
+    private func stopPlayer() {
+        eventTask?.cancel()
+        eventTask = nil
+        nowPlaying?.invalidate()
+        nowPlaying = nil
+        model.detach()
+        player?.destroy()
+        player = nil
+    }
+
+    /// Installs the bundled touch bindings as a default input section, so bindings for
+    /// the same keys in the user's input.conf win.
+    private func loadTouchBindings(into player: MPVPlayer) {
+        guard let url = Bundle.main.url(forResource: "touch", withExtension: "conf"),
+              let bindings = try? String(contentsOf: url, encoding: .utf8) else {
+            Log.player.error("touch.conf missing from bundle")
+            return
+        }
+        player.command("define-section", "yoru-touch", bindings, "default")
+        player.command("enable-section", "yoru-touch")
     }
 
     /// Tells mpv the layer's pixel size; this is what makes it resize its swapchain and
@@ -144,95 +168,19 @@ final class PlayerViewController: UIViewController {
         player?.setProperty("moltenvk-surface-size", "\(Int(size.width))x\(Int(size.height))")
     }
 
-    private func stopPlayer() {
-        eventTask?.cancel()
-        eventTask = nil
-        player?.destroy()
-        player = nil
-    }
-
-    private func observeProperties(of player: MPVPlayer) {
-        player.observe("pause", format: .flag)
-        player.observe("time-pos", format: .double)
-        player.observe("duration", format: .double)
-        // Cached so the background handler can restore it without a synchronous read.
-        player.observe("vid", format: .string)
-        for name in Self.diagnosticProperties {
-            player.observe(name, format: .string)
-        }
-    }
-
-    private static let diagnosticProperties = [
-        "hwdec-current",
-        "video-params/pixelformat",
-        "video-params/gamma",
-        "video-params/sig-peak",
-        "video-out-params/w",
-        "video-out-params/h",
-        "current-tracks/sub/codec",
-        "estimated-vf-fps",
-        "frame-drop-count",
-        "decoder-frame-drop-count",
-        "video-bitrate",
-    ]
-
     private func handle(_ event: MPVEvent) {
         switch event {
-        case .propertyChanged(let name, let value):
-            handleProperty(name, value)
+        case .propertyChanged(name: "vid", let value):
+            currentVideoTrack = value.stringValue
         case .log(let prefix, let level, let text):
             Log.mpv.info("[\(prefix, privacy: .public)] \(level, privacy: .public): \(text, privacy: .public)")
             #if DEBUG
             // os.Logger doesn't reach `devicectl --console`; mirror mpv logs to stdout while debugging.
             print("[mpv/\(prefix)] \(level): \(text)", terminator: "")
             #endif
-        case .fileLoaded, .videoReconfig:
-            updateDiagnostics()
-        case .endFile, .playbackRestart, .shutdown:
-            break
-        }
-    }
-
-    private func handleProperty(_ name: String, _ value: MPVValue) {
-        switch name {
-        case "pause":
-            isPaused = value.flagValue ?? false
-            playPauseButton.configuration?.image = UIImage(systemName: isPaused ? "play.fill" : "pause.fill")
-        case "time-pos":
-            let newPosition = value.doubleValue ?? 0
-            if !seekSlider.isTracking {
-                seekSlider.value = Float(newPosition)
-            }
-            guard Int(newPosition) != Int(timePosition) else {
-                timePosition = newPosition
-                return
-            }
-            timePosition = newPosition
-            updateTimeLabel()
-        case "duration":
-            duration = value.doubleValue ?? 0
-            seekSlider.maximumValue = Float(duration)
-            updateTimeLabel()
         default:
-            properties[name] = value.stringValue ?? "-"
-            updateDiagnostics()
+            model.handle(event)
         }
-    }
-
-    // MARK: - Seeking
-
-    @objc private func seekSliderChanged() {
-        // Keyframe seeks while dragging stay responsive on long files.
-        player?.command("seek", String(seekSlider.value), "absolute+keyframes")
-        timePosition = Double(seekSlider.value)
-        updateTimeLabel()
-    }
-
-    @objc private func seekSliderReleased() {
-        #if DEBUG
-        print("[yoru] seek released at \(seekSlider.value)")
-        #endif
-        player?.command("seek", String(seekSlider.value), "absolute+exact")
     }
 
     // MARK: - Posture
@@ -256,7 +204,7 @@ final class PlayerViewController: UIViewController {
         guard let player else { return }
         // Keep audio playing in the background but stop rendering; rendering into a
         // backgrounded layer leaves it black when returning.
-        savedVideoTrack = properties["vid"].flatMap { $0 == "-" ? nil : $0 } ?? "auto"
+        savedVideoTrack = currentVideoTrack ?? "auto"
         player.setProperty("vid", "no")
         // iOS may kill a backgrounded app without a quit, so persist the position now.
         player.command("write-watch-later-config")
@@ -266,135 +214,108 @@ final class PlayerViewController: UIViewController {
         player?.setProperty("vid", savedVideoTrack)
     }
 
-    // MARK: - Overlay
+    // MARK: - Controls
 
-    @objc private func toggleOverlay() {
-        let hidden = overlay.alpha > 0
-        UIView.animate(withDuration: 0.2) {
-            self.overlay.alpha = hidden ? 0 : 1
-        }
-    }
-
+    /// Each interactive control group is its own hosting view sized to its content, so
+    /// touches anywhere else reach the player view's gesture recognizers.
     private func buildViewHierarchy() {
         playerView.translatesAutoresizingMaskIntoConstraints = false
-        overlay.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(playerView)
-        view.addSubview(overlay)
+
+        let backdrop = host(PlayerBackdrop(model: model) { [weak self] in self?.environmentDiagnostics() ?? [] })
+        backdrop.isUserInteractionEnabled = false
+        let topBar = host(PlayerTopBar(model: model))
+        let transport = host(PlayerTransport(model: model))
+        let seekPanel = host(PlayerSeekPanel(model: model))
+        controlHosts = [topBar, transport, seekPanel]
+
+        let guide = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
             playerView.topAnchor.constraint(equalTo: view.topAnchor),
             playerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             playerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             playerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            overlay.topAnchor.constraint(equalTo: view.topAnchor),
-            overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-        ])
 
-        let closeButton = makeButton(systemImage: "xmark") { [weak self] in self?.onClose?() }
-        let statsButton = makeButton(systemImage: "chart.bar.xaxis") { [weak self] in
-            // Built-in Lua script: verifies LuaJIT is live.
-            self?.player?.command("script-binding", "stats/display-stats-toggle")
-        }
-        let topBar = UIStackView(arrangedSubviews: [closeButton, UIView(), statsButton])
-        topBar.axis = .horizontal
+            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
-        diagnosticsLabel.numberOfLines = 0
-        diagnosticsLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        diagnosticsLabel.textColor = .white
-        diagnosticsLabel.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+            topBar.topAnchor.constraint(equalTo: guide.topAnchor),
+            topBar.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+            topBar.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
 
-        timeLabel.font = .monospacedDigitSystemFont(ofSize: 14, weight: .medium)
-        timeLabel.textColor = .white
-        timeLabel.setContentHuggingPriority(.required, for: .horizontal)
-        seekSlider.addTarget(self, action: #selector(seekSliderChanged), for: .valueChanged)
-        seekSlider.addTarget(self, action: #selector(seekSliderReleased), for: [.touchUpInside, .touchUpOutside, .touchCancel])
-        let bottomBar = UIStackView(arrangedSubviews: [playPauseButton, seekSlider, timeLabel])
-        bottomBar.axis = .horizontal
-        bottomBar.alignment = .center
-        bottomBar.spacing = 12
+            transport.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            transport.centerYAnchor.constraint(equalTo: view.centerYAnchor),
 
-        for subview in [topBar, diagnosticsLabel, bottomBar] as [UIView] {
-            subview.translatesAutoresizingMaskIntoConstraints = false
-            overlay.addSubview(subview)
-        }
-        let guide = overlay.safeAreaLayoutGuide
-        NSLayoutConstraint.activate([
-            topBar.topAnchor.constraint(equalTo: guide.topAnchor, constant: 8),
-            topBar.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
-            topBar.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
-            diagnosticsLabel.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 8),
-            diagnosticsLabel.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
-            diagnosticsLabel.trailingAnchor.constraint(lessThanOrEqualTo: guide.trailingAnchor, constant: -16),
-            bottomBar.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -8),
-            bottomBar.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
-            bottomBar.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            seekPanel.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
+            seekPanel.centerXAnchor.constraint(equalTo: guide.centerXAnchor),
+            seekPanel.widthAnchor.constraint(lessThanOrEqualTo: guide.widthAnchor),
+            seekPanel.widthAnchor.constraint(equalTo: guide.widthAnchor).withPriority(.defaultHigh),
         ])
     }
 
-    private func makeButton(systemImage: String, action: @escaping @MainActor () -> Void) -> UIButton {
-        var configuration = UIButton.Configuration.glass()
-        configuration.image = UIImage(systemName: systemImage)
-        configuration.cornerStyle = .capsule
-        return UIButton(configuration: configuration, primaryAction: UIAction { _ in action() })
+    private func host(_ content: some View) -> UIView {
+        let controller = UIHostingController(rootView: content)
+        controller.sizingOptions = .intrinsicContentSize
+        controller.safeAreaRegions = []
+        controller.view.backgroundColor = .clear
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        addChild(controller)
+        view.addSubview(controller.view)
+        controller.didMove(toParent: self)
+        return controller.view
     }
 
-    private func updateTimeLabel() {
-        timeLabel.text = "\(Self.format(timePosition)) / \(Self.format(duration))"
+    /// Fades the interactive controls with `model.controlsVisible`. Hidden controls must
+    /// not swallow touches, hence UIKit-level alpha and interaction rather than SwiftUI opacity.
+    private func trackControlsVisibility() {
+        let visible = withObservationTracking {
+            model.controlsVisible
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.trackControlsVisibility() }
+        }
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            for host in self.controlHosts {
+                host.alpha = visible ? 1 : 0
+            }
+        }
+        for host in controlHosts {
+            host.isUserInteractionEnabled = visible
+        }
     }
 
-    private func updateDiagnostics() {
-        var lines = Self.diagnosticProperties.map { "\($0): \(properties[$0] ?? "-")" }
-        lines.append("edr-headroom: \(properties["edr-headroom"] ?? "-")")
-        let scale = playerView.metalLayer.contentsScale
+    // MARK: - Diagnostics
+
+    private func environmentDiagnostics() -> [String] {
+        let layer = playerView.metalLayer
+        var lines = [String(format: "edr-headroom (at start): %.2f", edrHeadroom)]
         lines.append(String(
             format: "view: %.0fx%.0f pt @%.2fx  drawable: %.0fx%.0f",
-            playerView.bounds.width, playerView.bounds.height, scale,
-            playerView.metalLayer.drawableSize.width, playerView.metalLayer.drawableSize.height
+            playerView.bounds.width, playerView.bounds.height, layer.contentsScale,
+            layer.drawableSize.width, layer.drawableSize.height
         ))
-        // HDR ground truth: what the layer was configured for and what the display is doing now.
-        let layer = playerView.metalLayer
         let colorSpace = layer.colorspace?.name.map { ($0 as String).replacingOccurrences(of: "kCGColorSpace", with: "") } ?? "nil"
-        lines.append("layer: \(colorSpace) fmt=\(layer.pixelFormat.rawValue) wantsEDR=\(layer.wantsExtendedDynamicRangeContent)")
+        lines.append("layer: \(colorSpace) wantsEDR=\(layer.wantsExtendedDynamicRangeContent)")
         if let screen = view.window?.windowScene?.screen {
             lines.append(String(format: "screen EDR: current=%.2f potential=%.2f", screen.currentEDRHeadroom, screen.potentialEDRHeadroom))
         }
-        lines.append("size class: w=\(Self.name(traitCollection.horizontalSizeClass)) h=\(Self.name(traitCollection.verticalSizeClass))")
         if let monitor = postureMonitor {
             lines.append("posture: \(monitor.posture)")
             if let hinge = monitor.hinge {
-                lines.append(String(format: "hinge: %@ %.1f°", String(describing: hinge.status), hinge.angle * 180 / .pi))
-            } else {
-                lines.append("hinge: none")
+                lines.append(String(format: "hinge: status=%d %.1f°", hinge.status.rawValue, hinge.angle * 180 / .pi))
             }
             for region in monitor.divisionRegions {
-                lines.append("division: \(region.frame.integral) active=\(region.isActive) margins=\(region.margins)")
+                lines.append("division: \(region.frame.integral) active=\(region.isActive)")
             }
         }
-        if let error = properties["error"] {
-            lines.append("ERROR: \(error)")
-        }
-        diagnosticsLabel.text = lines.joined(separator: "\n")
-    }
-
-    private static func format(_ seconds: Double) -> String {
-        let total = Int(seconds.isFinite ? seconds : 0)
-        return String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60)
-    }
-
-    private static func name(_ sizeClass: UIUserInterfaceSizeClass) -> String {
-        switch sizeClass {
-        case .compact: "compact"
-        case .regular: "regular"
-        default: "unspecified"
-        }
+        return lines
     }
 }
 
-/// A view that ignores touches on itself so they reach the views beneath.
-private final class PassthroughView: UIView {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hit = super.hitTest(point, with: event)
-        return hit === self ? nil : hit
+private extension NSLayoutConstraint {
+    func withPriority(_ priority: UILayoutPriority) -> NSLayoutConstraint {
+        self.priority = priority
+        return self
     }
 }

@@ -8,6 +8,8 @@ enum MPVValue: Sendable, Equatable {
     case int(Int64)
     case double(Double)
     case string(String)
+    indirect case array([MPVValue])
+    indirect case map([String: MPVValue])
 
     var doubleValue: Double? {
         switch self {
@@ -24,6 +26,18 @@ enum MPVValue: Sendable, Equatable {
     var stringValue: String? {
         if case .string(let value) = self { value } else { nil }
     }
+
+    var intValue: Int? {
+        if case .int(let value) = self { Int(value) } else { nil }
+    }
+
+    var arrayValue: [MPVValue]? {
+        if case .array(let value) = self { value } else { nil }
+    }
+
+    subscript(key: String) -> MPVValue? {
+        if case .map(let value) = self { value[key] } else { nil }
+    }
 }
 
 /// Property formats `MPVPlayer.observe` supports.
@@ -32,6 +46,8 @@ enum MPVFormat: Sendable {
     case int
     case double
     case string
+    /// Structured values (lists, maps), decoded into `MPVValue.array` / `.map`.
+    case node
 
     var raw: mpv_format {
         switch self {
@@ -39,6 +55,7 @@ enum MPVFormat: Sendable {
         case .int: MPV_FORMAT_INT64
         case .double: MPV_FORMAT_DOUBLE
         case .string: MPV_FORMAT_STRING
+        case .node: MPV_FORMAT_NODE
         }
     }
 }
@@ -50,6 +67,8 @@ enum MPVEvent: Sendable {
     case endFile
     case playbackRestart
     case videoReconfig
+    /// A `script-message` broadcast, e.g. from an input.conf binding.
+    case clientMessage([String])
     case log(prefix: String, level: String, text: String)
     case shutdown
 
@@ -78,6 +97,11 @@ enum MPVEvent: Sendable {
                 level: String(cString: message.level),
                 text: String(cString: message.text)
             )
+        case MPV_EVENT_CLIENT_MESSAGE:
+            guard let message = event.data?.assumingMemoryBound(to: mpv_event_client_message.self).pointee else {
+                return nil
+            }
+            self = .clientMessage((0..<Int(message.num_args)).map { String(cString: message.args[$0]!) })
         case MPV_EVENT_SHUTDOWN:
             self = .shutdown
         default:
@@ -106,6 +130,33 @@ private extension MPVValue {
             } else {
                 self = .none
             }
+        case MPV_FORMAT_NODE:
+            self = MPVValue(data.assumingMemoryBound(to: mpv_node.self).pointee)
+        default:
+            self = .none
+        }
+    }
+
+    init(_ node: mpv_node) {
+        switch node.format {
+        case MPV_FORMAT_FLAG:
+            self = .flag(node.u.flag != 0)
+        case MPV_FORMAT_INT64:
+            self = .int(node.u.int64)
+        case MPV_FORMAT_DOUBLE:
+            self = .double(node.u.double_)
+        case MPV_FORMAT_STRING:
+            self = .string(String(cString: node.u.string))
+        case MPV_FORMAT_NODE_ARRAY:
+            let list = node.u.list.pointee
+            self = .array((0..<Int(list.num)).map { MPVValue(list.values[$0]) })
+        case MPV_FORMAT_NODE_MAP:
+            let list = node.u.list.pointee
+            var map: [String: MPVValue] = [:]
+            for index in 0..<Int(list.num) {
+                map[String(cString: list.keys[index]!)] = MPVValue(list.values[index])
+            }
+            self = .map(map)
         default:
             self = .none
         }

@@ -6,12 +6,8 @@ struct PlayerScreen: UIViewControllerRepresentable {
     let onClose: () -> Void
 
     func makeUIViewController(context: Context) -> PlayerViewController {
-        let controller = PlayerViewController(location: target.location)
-        controller.onClose = onClose
-        return controller
+        PlayerViewController(location: target.location, onClose: onClose)
     }
 
-    func updateUIViewController(_ controller: PlayerViewController, context: Context) {
-        controller.onClose = onClose
-    }
+    func updateUIViewController(_ controller: PlayerViewController, context: Context) {}
 }

@@ -5,9 +5,34 @@ import UniformTypeIdentifiers
 struct BrowserItem: Identifiable, Hashable {
     let url: URL
     let isDirectory: Bool
+    let size: Int?
 
     var id: URL { url }
     var name: String { url.lastPathComponent }
+}
+
+private struct BrowserRow: View {
+    let item: BrowserItem
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: item.isDirectory ? "folder.fill" : "play.rectangle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(item.isDirectory ? Theme.accent : .secondary)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name)
+                    .font(.body)
+                    .lineLimit(2)
+                if let size = item.size, !item.isDirectory {
+                    Text(Int64(size), format: .byteCount(style: .file))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 /// Lists a directory of the app's Documents folder (M0: local files only).
@@ -24,26 +49,29 @@ struct LocalBrowserView: View {
         List(items) { item in
             if item.isDirectory {
                 NavigationLink(value: item) {
-                    Label(item.name, systemImage: "folder")
+                    BrowserRow(item: item)
                 }
             } else {
                 Button {
                     playing = PlaybackTarget(fileURL: item.url)
                 } label: {
-                    Label(item.name, systemImage: "film")
+                    BrowserRow(item: item)
                 }
+                .foregroundStyle(.primary)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
         .overlay {
             if items.isEmpty {
                 ContentUnavailableView(
                     "No Files",
                     systemImage: "tray",
-                    description: Text("Copy videos into Yoru with the Files app, or import them here.")
+                    description: Text("Copy videos into YORU with the Files app, or import them here.")
                 )
             }
         }
-        .navigationTitle(directory == URL.documentsDirectory ? "Yoru" : directory.lastPathComponent)
+        .navigationTitle(directory == URL.documentsDirectory ? "YORU" : directory.lastPathComponent)
         .toolbar {
             Button("Open Location", systemImage: "link") { isEnteringLocation = true }
             Button("Import", systemImage: "plus") { isImporting = true }
@@ -74,15 +102,15 @@ struct LocalBrowserView: View {
         let fileManager = FileManager.default
         let urls = (try? fileManager.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey],
+            includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         )) ?? []
         items = urls
             // The mpv config directory is managed through the Files app, not played from.
             .filter { $0.standardizedFileURL != ConfigDirectory.url.standardizedFileURL }
             .map { url in
-                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                return BrowserItem(url: url, isDirectory: isDirectory)
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+                return BrowserItem(url: url, isDirectory: values?.isDirectory ?? false, size: values?.fileSize)
             }
             .sorted { lhs, rhs in
                 if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
