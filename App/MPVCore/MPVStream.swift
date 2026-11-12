@@ -40,7 +40,7 @@ final class MPVStreamProtocol: Sendable {
         self.opener = opener
     }
 
-    /// Registers `scheme` with `handle`. The returned object must outlive the handle.
+    /// Registers `scheme` with `handle`. Streams are served through a `BlockCachedStream`. The returned object must outlive the handle.
     static func register(_ scheme: String, opener: @escaping MPVStreamOpener, on handle: OpaquePointer) -> MPVStreamProtocol {
         let registration = MPVStreamProtocol(opener: opener)
         mpv_stream_cb_add_ro(handle, scheme, Unmanaged.passUnretained(registration).toOpaque()) { userData, url, info in
@@ -49,7 +49,7 @@ final class MPVStreamProtocol: Sendable {
             guard let source = registration.opener(String(cString: url)) else {
                 return MPV_ERROR_LOADING_FAILED.rawValue
             }
-            info.pointee.cookie = Unmanaged.passRetained(SourceBox(source)).toOpaque()
+            info.pointee.cookie = Unmanaged.passRetained(SourceBox(BlockCachedStream(source))).toOpaque()
             info.pointee.read_fn = { cookie, buffer, count in
                 guard let cookie, let buffer else { return -1 }
                 let source = Unmanaged<SourceBox>.fromOpaque(cookie).takeUnretainedValue().source
