@@ -6,12 +6,12 @@ import UIKit
 /// lifecycle glue (background audio, foldable posture).
 final class PlayerViewController: UIViewController {
     private let target: PlaybackTarget
-    private var hasAttachedSubtitles = false
     private let model = PlayerModel()
     private let playerView = PlayerView()
 
     private var player: MPVPlayer?
     private var eventTask: Task<Void, Never>?
+    private var resumeSaveTask: Task<Void, Never>?
     private var touchInput: TouchInput?
     private var postureMonitor: PostureMonitor?
     private var nowPlaying: NowPlayingSession?
@@ -91,6 +91,14 @@ final class PlayerViewController: UIViewController {
             name: UIApplication.didEnterBackgroundNotification, object: nil
         )
         NotificationCenter.default.addObserver(
+            self, selector: #selector(saveResumePosition),
+            name: UIApplication.willResignActiveNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(saveResumePosition),
+            name: UIApplication.willTerminateNotification, object: nil
+        )
+        NotificationCenter.default.addObserver(
             self, selector: #selector(appWillEnterForeground),
             name: UIApplication.willEnterForegroundNotification, object: nil
         )
@@ -127,6 +135,11 @@ final class PlayerViewController: UIViewController {
             ("watch-later-dir", ConfigDirectory.url.appending(path: "watch_later").path),
             // Lets WatchHistory map saved positions back to files.
             ("write-filename-in-watch-later-config", "yes"),
+            // What is remembered per file: the position (`start` has to be listed, it is
+            // not implied), the chosen tracks and their timing. Narrower than mpv's default
+            // list, which would also bring back the speed and the zoom, and `vid`, which
+            // the app turns off in the background.
+            ("watch-later-options", "start,aid,sid,sub-visibility,sub-delay,audio-delay"),
             // Default and fallback subtitle font; see ConfigDirectory for why it is bundled.
             ("sub-font", "Noto Sans CJK SC"),
             ("osd-font", "Noto Sans CJK SC"),
@@ -154,10 +167,16 @@ final class PlayerViewController: UIViewController {
             // Cached so the background handler can restore it without a synchronous read.
             player.observe("vid", format: .string)
             nowPlaying = NowPlayingSession(model: model)
+            startSavingResumePosition()
             eventTask = Task { [weak self] in
                 for await event in player.events {
                     self?.handle(event)
                 }
+            }
+            // Given up front rather than added once the file is loaded, so they take part in
+            // mpv's track selection, and a remembered `sid` can point at one of them.
+            for subtitle in target.externalSubtitles {
+                player.command("change-list", "sub-files", "append", subtitle)
             }
             if target.forcesCache {
                 player.command("loadfile", target.location, "replace", "-1", "cache=yes")
@@ -179,7 +198,8 @@ final class PlayerViewController: UIViewController {
         systemVolume = nil
         model.detach()
         OrientationLock.set(.all, in: view.window?.windowScene)
-        // The resume position is written as mpv shuts down.
+        resumeSaveTask?.cancel()
+        resumeSaveTask = nil
         player?.destroy {
             Task { @MainActor in WatchHistory.shared.reload() }
         }
@@ -214,14 +234,6 @@ final class PlayerViewController: UIViewController {
         case .endFile(.endOfFile):
             // Only reached with `keep-open=no`; otherwise mpv pauses on the last frame.
             model.onClose?()
-        case .fileLoaded:
-            if !hasAttachedSubtitles {
-                hasAttachedSubtitles = true
-                for subtitle in target.externalSubtitles {
-                    player?.command("sub-add", subtitle, "auto")
-                }
-            }
-            model.handle(event)
         default:
             model.handle(event)
         }
@@ -286,14 +298,33 @@ final class PlayerViewController: UIViewController {
 
     // MARK: - App lifecycle
 
+    /// Writes the resume file now.
+    ///
+    /// mpv writes it when it quits, but deletes the previous one as soon as a file is
+    /// opened, and iOS can end the app with no chance to quit mpv: swiped away in the app
+    /// switcher, or killed in the background. So the position is also saved whenever the
+    /// app stops being active, and every so often while playing.
+    @objc private func saveResumePosition() {
+        player?.command("write-watch-later-config")
+    }
+
+    private func startSavingResumePosition() {
+        resumeSaveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled else { return }
+                self?.saveResumePosition()
+            }
+        }
+    }
+
     @objc private func appDidEnterBackground() {
         guard let player else { return }
         // Keep audio playing in the background but stop rendering; rendering into a
         // backgrounded layer leaves it black when returning.
         savedVideoTrack = currentVideoTrack ?? "auto"
         player.setProperty("vid", "no")
-        // iOS may kill a backgrounded app without a quit, so persist the position now.
-        player.command("write-watch-later-config")
+        saveResumePosition()
     }
 
     @objc private func appWillEnterForeground() {

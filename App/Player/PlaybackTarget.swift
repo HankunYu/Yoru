@@ -5,8 +5,8 @@ struct PlaybackTarget: Identifiable {
     let id = UUID()
     /// A file path or any URL mpv understands (`smb://`, `http://`, `dav://`, ...).
     let location: String
-    /// Subtitle files to attach once the file is loaded. mpv finds same-folder subtitles
-    /// itself only for local files; for other sources the browser supplies them.
+    /// Subtitle files to load with the file. mpv finds same-folder subtitles itself only
+    /// for local files; for other sources the browser supplies them.
     let externalSubtitles: [String]
     /// Whether to turn mpv's cache on explicitly. It does so on its own for network URLs it
     /// opens itself, but streams served by the app look local to it.
