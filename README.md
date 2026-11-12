@@ -45,6 +45,13 @@ host-driven resizing, and the `GESTURE_*` key names). The GPL build is used.
 - `Vendor/CSMBClient` — a module map exposing `libsmbclient.h`.
 - `Design/` — app icon drafts.
 
+## License
+
+YORU is free software, licensed under the GNU General Public License, version 3 or (at
+your option) any later version; see [LICENSE](LICENSE). The libraries it links (mpv and
+FFmpeg in their GPL builds, and libsmbclient, which is GPLv3 or later) make any built copy
+of the app a GPLv3 work as well.
+
 ## Third-party
 
 mpv, FFmpeg and libsmbclient (through MPVKit), libass, libplacebo, MoltenVK and LuaJIT.
