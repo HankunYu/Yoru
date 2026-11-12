@@ -35,8 +35,6 @@ struct PlaybackTarget: Identifiable {
     let externalSubtitles: [String]
     /// Whether to turn mpv's cache on explicitly; see `PlaybackLocation`.
     let forcesCache: Bool
-    /// Request headers for an HTTP location, also sent for its subtitles.
-    let httpHeaders: [String]
     /// The browser item this came from, if it came from the browser.
     let itemURL: URL?
     /// Where previous and next lead; nil for a file opened on its own.
@@ -60,7 +58,6 @@ struct PlaybackTarget: Identifiable {
         externalSubtitles = []
         // An smb:// link is served by the app, so mpv does not see it as a network source.
         forcesCache = location.lowercased().hasPrefix(SMBSource.linkScheme + "://")
-        httpHeaders = []
         initialSubtitleChoice = nil
         itemURL = nil
         securityScopedURL = nil
@@ -75,7 +72,6 @@ struct PlaybackTarget: Identifiable {
         let playback = source.playback(of: item.url)
         location = playback.location
         forcesCache = playback.forcesCache
-        httpHeaders = playback.httpHeaders
         let options = PlayerOptions.load()
         // mpv scans the folder of a local file itself.
         guard !item.url.isFileURL, options.loadsExternalSubtitles else {
@@ -106,7 +102,6 @@ struct PlaybackTarget: Identifiable {
         location = url.path
         externalSubtitles = []
         forcesCache = false
-        httpHeaders = []
         initialSubtitleChoice = nil
         itemURL = nil
         securityScopedURL = url.startAccessingSecurityScopedResource() ? url : nil

@@ -67,6 +67,10 @@ final class BlockCachedStream: MPVStreamSource {
         return true
     }
 
+    func cancel() {
+        source.cancel()
+    }
+
     func close() {
         source.close()
     }

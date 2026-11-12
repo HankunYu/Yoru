@@ -21,8 +21,6 @@ struct PlaybackLocation {
     /// Whether to turn mpv's cache on explicitly. It does so on its own for network URLs it
     /// opens itself, but streams served by the app look local to it.
     var forcesCache = false
-    /// Request headers for HTTP locations (`http-header-fields`), e.g. authorization.
-    var httpHeaders: [String] = []
 }
 
 enum MediaSources {
@@ -41,6 +39,7 @@ enum MediaSources {
         // libsmbclient and outside the lock every other use of it takes, which crashes
         // when the two run at once. Registered here they take precedence over mpv's own.
         SMBSource.linkScheme: SMBSource.openLink,
+        MediaServer.Kind.webDAV.scheme: WebDAVSource.openStream,
     ]
 }
 
@@ -206,8 +205,9 @@ struct SMBSource: MediaSource {
 
 /// Saved WebDAV servers, addressed as `yoru-dav://<server id>/<path below the base URL>`.
 ///
-/// Listing goes through `WebDAVClient`. Playback is mpv's own HTTP: it gets the file's real
-/// URL, which holds no login, and the authorization as a request header.
+/// Listing goes through `WebDAVClient`, playback through `WebDAVStream`: the app serves the
+/// file to mpv, as it does for SMB. FFmpeg's own HTTP reconnects on every seek, which a
+/// file whose audio and video lie apart asks for dozens of times a second.
 struct WebDAVSource: MediaSource {
     let supportsDeletion = false
 
@@ -239,13 +239,18 @@ struct WebDAVSource: MediaSource {
     }
 
     func playback(of url: URL) -> PlaybackLocation {
-        guard let (serverID, path) = MediaServer.parse(url), let client = WebDAVClient(serverID: serverID),
-              let location = client.url(for: path) else {
-            return PlaybackLocation(location: url.absoluteString)
+        PlaybackLocation(location: url.absoluteString, forcesCache: true)
+    }
+
+    /// Opens a file for mpv. Runs on an mpv thread.
+    static let openStream: MPVStreamOpener = { location in
+        guard let url = URL(string: location), let (serverID, path) = MediaServer.parse(url),
+              let client = WebDAVClient(serverID: serverID) else { return nil }
+        do {
+            return try WebDAVStream(client: client, path: path)
+        } catch {
+            Log.app.error("Opening a WebDAV stream failed: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
-        return PlaybackLocation(
-            location: location.absoluteString,
-            httpHeaders: client.authorization.map { ["Authorization: \($0)"] } ?? []
-        )
     }
 }

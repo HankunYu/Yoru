@@ -266,8 +266,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
         // Given up front rather than added once the file is loaded, so they take part in
         // mpv's track selection, and a remembered `sid` can point at one of them.
-        // Replaces what the previous file set, so a login never travels to another server.
-        player.setProperty("http-header-fields", target.httpHeaders.joined(separator: ","))
         player.command("change-list", "sub-files", "clr", "")
         for subtitle in target.externalSubtitles {
             player.command("change-list", "sub-files", "append", subtitle)

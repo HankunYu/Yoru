@@ -50,9 +50,6 @@ enum ThumbnailRenderer {
         for (name, value) in options {
             mpv_set_option_string(handle, name, value)
         }
-        if !playback.httpHeaders.isEmpty {
-            mpv_set_option_string(handle, "http-header-fields", playback.httpHeaders.joined(separator: ","))
-        }
         mpv_request_log_messages(handle, "no")
         guard mpv_initialize(handle) >= 0, let context = makeRenderContext(handle) else {
             return (nil, info)

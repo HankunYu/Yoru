@@ -10,7 +10,14 @@ protocol MPVStreamSource: AnyObject {
     /// Reads up to `count` bytes. Returns the number read, 0 at the end, negative on error.
     func read(into buffer: UnsafeMutableRawPointer, count: Int) -> Int
     func seek(to offset: Int64) -> Bool
+    /// Makes a read that is waiting return soon, and later ones fail. The one call that
+    /// may arrive from another thread while a read is running.
+    func cancel()
     func close()
+}
+
+extension MPVStreamSource {
+    func cancel() {}
 }
 
 /// Counts the bytes mpv has read through app-served streams, so the interface can show a
@@ -66,6 +73,10 @@ final class MPVStreamProtocol: Sendable {
                 guard let cookie else { return Int64(MPV_ERROR_UNSUPPORTED.rawValue) }
                 let source = Unmanaged<SourceBox>.fromOpaque(cookie).takeUnretainedValue().source
                 return source.size ?? Int64(MPV_ERROR_UNSUPPORTED.rawValue)
+            }
+            info.pointee.cancel_fn = { cookie in
+                guard let cookie else { return }
+                Unmanaged<SourceBox>.fromOpaque(cookie).takeUnretainedValue().source.cancel()
             }
             info.pointee.close_fn = { cookie in
                 guard let cookie else { return }
