@@ -108,7 +108,12 @@ struct BrowserView: View {
                 if isRoot {
                     Button("Add Server", systemImage: "server.rack") { isAddingServer = true }
                 }
-                Button("Open Location", systemImage: "link") { isEnteringLocation = true }
+                if isLocal {
+                    Button("Open Location", systemImage: "link") { isEnteringLocation = true }
+                } else {
+                    // On a server the way back to the top is several levels long.
+                    Button("Home", systemImage: "house") { path.removeAll() }
+                }
                 if isLocal {
                     Button("Import", systemImage: "plus") { isImporting = true }
                         .disabled(importer.isImporting)
