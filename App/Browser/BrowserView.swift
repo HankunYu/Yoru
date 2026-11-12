@@ -103,12 +103,11 @@ struct BrowserView: View {
                         Label("Size", systemImage: "internaldrive").tag(BrowserSortOrder.size)
                     }
                     .pickerStyle(.inline)
-                    Divider()
-                    if isRoot {
-                        Button("Add Server", systemImage: "server.rack") { isAddingServer = true }
-                    }
-                    Button("Open Location", systemImage: "link") { isEnteringLocation = true }
                 }
+                if isRoot {
+                    Button("Add Server", systemImage: "server.rack") { isAddingServer = true }
+                }
+                Button("Open Location", systemImage: "link") { isEnteringLocation = true }
                 if isLocal {
                     Button("Import", systemImage: "plus") { isImporting = true }
                         .disabled(importer.isImporting)
@@ -122,7 +121,7 @@ struct BrowserView: View {
             SettingsView()
         }
         .alert("Open Location", isPresented: $isEnteringLocation) {
-            TextField("smb://user:pass@host/share/file.mkv", text: $enteredLocation)
+            TextField("URL", text: $enteredLocation, prompt: Text(verbatim: "https://example.com/video.mp4"))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -134,7 +133,7 @@ struct BrowserView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Any URL mpv can open: smb, http(s), dav(s).")
+            Text("Enter the address of a video or stream. Supported: http, https (including HLS and DASH streams), ftp, rtsp and rtmp.")
         }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             importFiles(result)
