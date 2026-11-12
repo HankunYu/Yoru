@@ -7,8 +7,12 @@ options:
   developmentLanguage: en
 
 packages:
+  # Fork of MPVKit with LuaJIT on iOS and Yoru's libmpv patches; its `yoru` branch pulls a
+  # prebuilt Libmpv-GPL from the fork's releases. To work on libmpv itself, check the fork
+  # out next to this repository and use `path: ../MPVKit` instead.
   MPVKit:
-    path: ../MPVKit
+    url: https://github.com/HankunYu/MPVKit
+    branch: yoru
 
 settings:
   base:
