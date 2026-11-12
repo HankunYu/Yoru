@@ -171,6 +171,10 @@ both choices are app UI state in UserDefaults. One `UICollectionView` serves bot
   and suspended while the player is open.
 - **Resume progress**: `WatchHistory` parses `watch_later`; the player sets
   `write-filename-in-watch-later-config` so each entry names its file.
+- **Resume across reinstalls**: mpv names a resume file by the MD5 of the absolute path, and
+  the app's container path changes on every reinstall. At launch `ResumePositions.rebase`
+  rewrites entries that point into an old container (keeping the newest per file) and
+  deletes mpv's redirect entries, which only serve directory playback.
 - **Folders** show their first three files' thumbnails as a stack of cards.
 - Only local files get thumbnails; network locations are out of scope until M2.
 

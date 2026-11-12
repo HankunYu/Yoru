@@ -7,6 +7,14 @@ struct YoruApp: App {
 
     init() {
         ConfigDirectory.prepare()
+        // The container directory is named by its ID; skip anything that does not look like one.
+        let containerID = URL.homeDirectory.lastPathComponent
+        if UUID(uuidString: containerID) != nil {
+            ResumePositions.rebase(
+                in: ConfigDirectory.url.appending(path: "watch_later", directoryHint: .isDirectory),
+                containerID: containerID
+            )
+        }
         do {
             // Playback category keeps audio going with the screen locked or the app in the background.
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
