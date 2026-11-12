@@ -41,7 +41,7 @@ enum BrowserViewMode: String, CaseIterable {
     case list
 }
 
-/// How the browser orders files. Servers, then folders, always come first, sorted by name.
+/// How the browser orders items within each kind. Servers, then folders, always come first.
 enum BrowserSortOrder: String, CaseIterable {
     case name
     /// Most recently modified first.
@@ -59,15 +59,15 @@ extension [BrowserItem] {
 private extension BrowserItem {
     func precedes(_ other: BrowserItem, by order: BrowserSortOrder) -> Bool {
         if kind != other.kind { return kind.rawValue < other.kind.rawValue }
-        if kind == .file {
-            switch order {
-            case .name:
-                break
-            case .date:
-                if modified != other.modified { return (modified ?? .distantPast) > (other.modified ?? .distantPast) }
-            case .size:
-                if size != other.size { return (size ?? 0) > (other.size ?? 0) }
-            }
+        switch order {
+        case .name:
+            break
+        case .date:
+            // Folders have dates too; a server's shares and the servers themselves do not.
+            if modified != other.modified { return (modified ?? .distantPast) > (other.modified ?? .distantPast) }
+        case .size:
+            // Only files have a size; folders stay in name order.
+            if kind == .file, size != other.size { return (size ?? 0) > (other.size ?? 0) }
         }
         return name.localizedStandardCompare(other.name) == .orderedAscending
     }
