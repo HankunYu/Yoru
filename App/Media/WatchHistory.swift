@@ -13,6 +13,8 @@ final class WatchHistory {
 
     /// Resume position in seconds, keyed by normalized file path.
     private var positions: [String: Double] = [:]
+    /// Every location with a resume file, whatever it holds.
+    private var locations: Set<String> = []
 
     private init() {
         reload()
@@ -22,18 +24,24 @@ final class WatchHistory {
         positions[Self.normalize(url.path)]
     }
 
+    /// Whether anything is remembered for a location as given to mpv: a file path or a URL.
+    func hasEntry(forLocation location: String) -> Bool {
+        locations.contains(Self.normalize(location))
+    }
+
     func reload() {
         Task {
-            positions = await Task.detached(priority: .utility) { Self.readPositions() }.value
+            (positions, locations) = await Task.detached(priority: .utility) { Self.readEntries() }.value
         }
     }
 
     // MARK: - Private
 
-    private nonisolated static func readPositions() -> [String: Double] {
+    private nonisolated static func readEntries() -> (positions: [String: Double], locations: Set<String>) {
         let directory = ConfigDirectory.url.appending(path: "watch_later", directoryHint: .isDirectory)
         let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         var positions: [String: Double] = [:]
+        var locations: Set<String> = []
         for file in files {
             guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
             var path: String?
@@ -45,11 +53,14 @@ final class WatchHistory {
                     start = Double(line.dropFirst("start=".count))
                 }
             }
-            if let path, let start {
-                positions[normalize(path)] = start
+            if let path {
+                locations.insert(normalize(path))
+                if let start {
+                    positions[normalize(path)] = start
+                }
             }
         }
-        return positions
+        return (positions, locations)
     }
 
     /// `/private/var/...` and `/var/...` name the same file.

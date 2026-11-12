@@ -15,16 +15,19 @@ struct PlayerBackdrop: View {
                 .opacity(showsScrims ? 1 : 0)
                 .animation(.easeInOut(duration: 0.25), value: showsScrims)
 
-            if model.isBuffering {
+            if model.isWaiting {
                 VStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.large)
                         .tint(.white)
-                    // How fast the source is delivering, so a stall can be told from a slow link.
-                    Text(verbatim: "\(Int64(model.cacheSpeed).formatted(.byteCount(style: .binary)))/s")
-                        .font(.footnote.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.white)
-                        .shadow(color: Theme.controlShadow, radius: 6, y: 1)
+                    // How fast the source is delivering, so a stall can be told from a slow
+                    // link. Local files open without reading through a measured stream.
+                    if model.transferSpeed > 0 || model.isBuffering {
+                        Text(verbatim: "\(Int64(model.transferSpeed).formatted(.byteCount(style: .binary)))/s")
+                            .font(.footnote.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .shadow(color: Theme.controlShadow, radius: 6, y: 1)
+                    }
                 }
             }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Libmpv
+import os
 
 /// A byte stream the app serves to mpv for a custom URL scheme (libmpv's `stream_cb`).
 /// mpv calls it from its own threads, one call at a time.
@@ -10,6 +11,22 @@ protocol MPVStreamSource: AnyObject {
     func read(into buffer: UnsafeMutableRawPointer, count: Int) -> Int
     func seek(to offset: Int64) -> Bool
     func close()
+}
+
+/// Counts the bytes mpv has read through app-served streams, so the interface can show a
+/// transfer rate from the moment a file starts opening. mpv's own `cache-speed` only
+/// starts once its cache is running, which is after the slowest part.
+enum MPVStreamMeter {
+    private static let total = OSAllocatedUnfairLock<Int64>(initialState: 0)
+
+    static var bytesRead: Int64 {
+        total.withLock { $0 }
+    }
+
+    fileprivate static func add(_ count: Int) {
+        guard count > 0 else { return }
+        total.withLock { $0 += Int64(count) }
+    }
 }
 
 /// Opens the stream for a URL of a registered scheme; nil if it cannot be opened.
@@ -36,7 +53,9 @@ final class MPVStreamProtocol: Sendable {
             info.pointee.read_fn = { cookie, buffer, count in
                 guard let cookie, let buffer else { return -1 }
                 let source = Unmanaged<SourceBox>.fromOpaque(cookie).takeUnretainedValue().source
-                return Int64(source.read(into: buffer, count: Int(count)))
+                let read = source.read(into: buffer, count: Int(count))
+                MPVStreamMeter.add(read)
+                return Int64(read)
             }
             info.pointee.seek_fn = { cookie, offset in
                 guard let cookie else { return Int64(MPV_ERROR_GENERIC.rawValue) }

@@ -4,8 +4,12 @@ import UIKit
 /// Full-screen player. Owns one `MPVPlayer` and its render view, and composes the pieces
 /// around it: touch input, the SwiftUI controls, lock screen integration, and the iOS
 /// lifecycle glue (background audio, foldable posture).
-final class PlayerViewController: UIViewController {
-    private let target: PlaybackTarget
+final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate {
+    // The file being played; replaced when moving through the folder.
+    private var target: PlaybackTarget
+    private let endAction = YoruOptions.load().endAction
+    // The app saves positions on its own schedule too, and must not when resuming is off.
+    private let resumesPlayback = PlayerOptions.load().resumesPlayback
     private let model = PlayerModel()
     private let playerView = PlayerView()
 
@@ -21,6 +25,8 @@ final class PlayerViewController: UIViewController {
     private var splitPanel: UIView?
     // The adjustments panel; laid out by frame, since where it goes depends on the posture.
     private var adjustmentPanel: UIView?
+    // Whether the panel is on screen, as far as its slide animation is concerned.
+    private var isAdjustmentPanelPresented = false
     // The full-width control rows and their trailing/leading edge constraints, adjusted by
     // `updateControlInsets()` to step around occlusions.
     private var controlRows: [(host: UIView, leading: NSLayoutConstraint, trailing: NSLayoutConstraint)] = []
@@ -144,6 +150,9 @@ final class PlayerViewController: UIViewController {
             // list, which would also bring back the speed and the zoom, and `vid`, which
             // the app turns off in the background.
             ("watch-later-options", "start,aid,sid,sub-visibility,sub-delay,audio-delay"),
+            // A track picked by number means nothing in the next file, and its timing and
+            // loop points belong to this one. Speed and picture adjustments carry over.
+            ("reset-on-next-file", "aid,sid,secondary-sid,sub-visibility,sub-delay,audio-delay,ab-loop-a,ab-loop-b"),
             // Default and fallback subtitle font; see ConfigDirectory for why it is bundled.
             ("sub-font", "Noto Sans CJK SC"),
             ("osd-font", "Noto Sans CJK SC"),
@@ -168,6 +177,8 @@ final class PlayerViewController: UIViewController {
             syncSurfaceSize()
             loadTouchBindings(into: player)
             model.attach(player)
+            model.onStep = { [weak self] offset in self?.step(offset) }
+            model.onReachedEnd = { [weak self] in self?.playbackReachedEnd() }
             // Cached so the background handler can restore it without a synchronous read.
             player.observe("vid", format: .string)
             nowPlaying = NowPlayingSession(model: model)
@@ -177,19 +188,64 @@ final class PlayerViewController: UIViewController {
                     self?.handle(event)
                 }
             }
-            // Given up front rather than added once the file is loaded, so they take part in
-            // mpv's track selection, and a remembered `sid` can point at one of them.
-            for subtitle in target.externalSubtitles {
-                player.command("change-list", "sub-files", "append", subtitle)
-            }
-            if target.forcesCache {
-                player.command("loadfile", target.location, "replace", "-1", "cache=yes")
-            } else {
-                player.command("loadfile", target.location)
-            }
+            load(target)
         } catch {
             Log.player.error("Starting mpv failed: \(error.description, privacy: .public)")
             model.report(error: error.description)
+        }
+    }
+
+    /// Opens `target` in the running player, replacing whatever is playing.
+    private func load(_ target: PlaybackTarget) {
+        guard let player else { return }
+        self.target = target
+        let index = target.queue?.index(of: target)
+        model.hasPrevious = index.map { $0 > 0 } ?? false
+        model.hasNext = index.map { $0 + 1 < (target.queue?.items.count ?? 0) } ?? false
+        model.initialSubtitleChoice = target.initialSubtitleChoice
+        model.beginLoading()
+
+        // Given up front rather than added once the file is loaded, so they take part in
+        // mpv's track selection, and a remembered `sid` can point at one of them.
+        player.command("change-list", "sub-files", "clr", "")
+        for subtitle in target.externalSubtitles {
+            player.command("change-list", "sub-files", "append", subtitle)
+        }
+        if target.forcesCache {
+            player.command("loadfile", target.location, "replace", "-1", "cache=yes")
+        } else {
+            player.command("loadfile", target.location)
+        }
+    }
+
+    /// Moves to the previous (-1) or next (1) file of the folder.
+    private func step(_ offset: Int) {
+        guard let queue = target.queue, let index = queue.index(of: target),
+              queue.items.indices.contains(index + offset) else { return }
+        forgetOrSaveResumePosition()
+        load(queue.target(at: index + offset))
+        // The file being left may have been paused, by the user or at its end.
+        player?.setProperty("pause", "no")
+    }
+
+    private func playbackReachedEnd() {
+        switch endAction {
+        case .next where model.hasNext:
+            step(1)
+        case .close:
+            model.onClose?()
+        case .next, .stay:
+            break
+        }
+    }
+
+    /// Saves where the current file was left; a file left at its end or in its credits
+    /// is forgotten instead, so it starts over next time.
+    /// - Parameter isQuitting: mpv is about to quit, which would write the position again.
+    private func forgetOrSaveResumePosition(isQuitting: Bool = false) {
+        saveResumePosition()
+        if isQuitting, model.isNearEnd {
+            player?.setProperty("save-position-on-quit", "no")
         }
     }
 
@@ -204,6 +260,7 @@ final class PlayerViewController: UIViewController {
         OrientationLock.set(.all, in: view.window?.windowScene)
         resumeSaveTask?.cancel()
         resumeSaveTask = nil
+        forgetOrSaveResumePosition(isQuitting: true)
         player?.destroy {
             Task { @MainActor in WatchHistory.shared.reload() }
         }
@@ -236,8 +293,13 @@ final class PlayerViewController: UIViewController {
             print("[mpv/\(prefix)] \(level): \(text)", terminator: "")
             #endif
         case .endFile(.endOfFile):
-            // Only reached with `keep-open=no`; otherwise mpv pauses on the last frame.
-            model.onClose?()
+            // Only reached when mpv.conf sets `keep-open=no`; otherwise mpv pauses on the
+            // last frame and the model reports the end. There is no frame to stay on here.
+            if endAction == .next, model.hasNext {
+                step(1)
+            } else {
+                model.onClose?()
+            }
         default:
             model.handle(event)
         }
@@ -302,14 +364,17 @@ final class PlayerViewController: UIViewController {
 
     // MARK: - App lifecycle
 
-    /// Writes the resume file now.
+    /// Writes the resume file now, or removes it when the file is as good as finished.
     ///
     /// mpv writes it when it quits, but deletes the previous one as soon as a file is
     /// opened, and iOS can end the app with no chance to quit mpv: swiped away in the app
     /// switcher, or killed in the background. So the position is also saved whenever the
     /// app stops being active, and every so often while playing.
     @objc private func saveResumePosition() {
-        player?.command("write-watch-later-config")
+        guard resumesPlayback else { return }
+        // Near the end there is nothing worth resuming, and what an earlier save left
+        // behind has to go too.
+        player?.command(model.isNearEnd ? "delete-watch-later-config" : "write-watch-later-config")
     }
 
     private func startSavingResumePosition() {
@@ -358,6 +423,10 @@ final class PlayerViewController: UIViewController {
         self.splitPanel = splitPanel
         let adjustmentPanel = host(AdjustmentPanel(model: model), fillsItsFrame: true)
         adjustmentPanel.translatesAutoresizingMaskIntoConstraints = true
+        adjustmentPanel.alpha = 0
+        let dismissPan = UIPanGestureRecognizer(target: self, action: #selector(handleAdjustmentPanelPan))
+        dismissPan.delegate = self
+        adjustmentPanel.addGestureRecognizer(dismissPan)
         self.adjustmentPanel = adjustmentPanel
 
         view.addLayoutGuide(controlsGuide)
@@ -441,28 +510,158 @@ final class PlayerViewController: UIViewController {
         }
     }
 
-    /// - Parameter fillsItsFrame: The view is sized by its constraints rather than by its content.
     /// Half-folded, the panel takes the controls' half. Otherwise it is a drawer along the
     /// trailing edge on a wide view and a sheet along the bottom on a tall one, leaving as
     /// much of the picture visible as it can.
+    ///
+    /// It keeps the same distance from every display edge it sits against, so its corners
+    /// can follow the display's. The safe area is not used: its bottom inset is for a home
+    /// indicator that is hidden while playing, and its side inset on the outer display
+    /// reserves a full-height strip for a camera in one corner. The panel instead steps
+    /// aside only for an occlusion that would actually overlap it.
     private func layoutAdjustmentPanel() {
         guard let adjustmentPanel else { return }
-        let area = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 10, dy: 10)
-        let frame: CGRect
+        let margin: CGFloat = 10
+        let bounds = view.bounds
+        var frame: CGRect
         if model.hasDedicatedControlArea {
-            frame = controlsGuide.layoutFrame.insetBy(dx: 10, dy: 10)
-        } else if area.width > area.height {
-            let width = min(360, area.width * 0.5)
-            frame = CGRect(x: area.maxX - width, y: area.minY, width: width, height: area.height)
+            let top = controlsGuide.layoutFrame.minY
+            frame = CGRect(
+                x: margin, y: top + margin,
+                width: bounds.width - margin * 2, height: bounds.maxY - top - margin * 2
+            )
+        } else if bounds.width > bounds.height {
+            let width = min(360, bounds.width * 0.5)
+            frame = CGRect(
+                x: bounds.maxX - margin - width, y: margin,
+                width: width, height: bounds.height - margin * 2
+            )
         } else {
-            let height = min(440, area.height * 0.5)
-            frame = CGRect(x: area.minX, y: area.maxY - height, width: area.width, height: height)
+            let height = min(440, bounds.height * 0.5)
+            frame = CGRect(
+                x: margin, y: bounds.maxY - margin - height,
+                width: bounds.width - margin * 2, height: height
+            )
         }
-        if adjustmentPanel.frame != frame {
-            adjustmentPanel.frame = frame
+        for occlusion in view.reservedRegions(kind: .occlusion).filter(\.isActive).map(\.frame)
+        where occlusion.intersects(frame) {
+            // Give up the strip beside the occlusion, on whichever side it is.
+            if occlusion.midX > bounds.midX {
+                frame.size.width = max(occlusion.minX - margin - frame.minX, 0)
+            } else {
+                let shift = occlusion.maxX + margin - frame.minX
+                frame.origin.x += shift
+                frame.size.width = max(frame.width - shift, 0)
+            }
+        }
+        // Position through bounds and center: the frame is undefined while the panel is
+        // transformed, which it is whenever it slides.
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        if adjustmentPanel.bounds.size != frame.size || adjustmentPanel.center != center {
+            adjustmentPanel.bounds.size = frame.size
+            adjustmentPanel.center = center
+        }
+        let risesFromBottom = model.hasDedicatedControlArea || bounds.width <= bounds.height
+        if model.adjustmentsRiseFromBottom != risesFromBottom {
+            model.adjustmentsRiseFromBottom = risesFromBottom
+        }
+        // Parked off screen while fully hidden, ready to slide in. Not while it is still
+        // sliding out: a layout pass then would cut the animation short.
+        if !isAdjustmentPanelPresented, adjustmentPanel.alpha == 0 {
+            adjustmentPanel.transform = adjustmentPanelOffscreenTransform
         }
     }
 
+    /// Moves the panel past the display edge it comes from: the bottom, or the trailing side.
+    private var adjustmentPanelOffscreenTransform: CGAffineTransform {
+        guard let adjustmentPanel else { return .identity }
+        let size = adjustmentPanel.bounds.size
+        let center = adjustmentPanel.center
+        if model.adjustmentsRiseFromBottom {
+            return CGAffineTransform(translationX: 0, y: view.bounds.maxY - (center.y - size.height / 2))
+        }
+        return CGAffineTransform(translationX: view.bounds.maxX - (center.x - size.width / 2), y: 0)
+    }
+
+    private func setAdjustmentPanelPresented(_ presented: Bool) {
+        guard let adjustmentPanel, presented != isAdjustmentPanelPresented else { return }
+        isAdjustmentPanelPresented = presented
+        if presented {
+            view.layoutIfNeeded()
+            adjustmentPanel.alpha = 1
+        }
+        adjustmentPanel.isUserInteractionEnabled = presented
+        UIView.animate(
+            withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.88, initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            adjustmentPanel.transform = presented ? .identity : self.adjustmentPanelOffscreenTransform
+        } completion: { _ in
+            if !self.isAdjustmentPanelPresented {
+                adjustmentPanel.alpha = 0
+            }
+        }
+    }
+
+    /// Dragging the panel toward the edge it came from moves it along; letting go far
+    /// enough, or fast enough, sends it away.
+    @objc private func handleAdjustmentPanelPan(_ recognizer: UIPanGestureRecognizer) {
+        guard let adjustmentPanel, isAdjustmentPanelPresented else { return }
+        let vertical = model.adjustmentsRiseFromBottom
+        let translation = recognizer.translation(in: view)
+        let velocity = recognizer.velocity(in: view)
+        let travel = max(vertical ? translation.y : translation.x, 0)
+        let speed = vertical ? velocity.y : velocity.x
+        let extent = vertical ? adjustmentPanel.bounds.height : adjustmentPanel.bounds.width
+        switch recognizer.state {
+        case .changed:
+            adjustmentPanel.transform = vertical
+                ? CGAffineTransform(translationX: 0, y: travel)
+                : CGAffineTransform(translationX: travel, y: 0)
+        case .ended, .cancelled:
+            if recognizer.state == .ended, travel > extent / 3 || speed > 600 {
+                model.hideAdjustments()
+            } else {
+                UIView.animate(
+                    withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
+                    options: [.beginFromCurrentState, .allowUserInteraction]
+                ) {
+                    adjustmentPanel.transform = .identity
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    // The dismiss drag must not steal touches from the panel's own controls.
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var view = touch.view
+        while let current = view, current !== adjustmentPanel {
+            if current is UIControl { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = recognizer as? UIPanGestureRecognizer, let adjustmentPanel else { return true }
+        let velocity = pan.velocity(in: view)
+        if model.adjustmentsRiseFromBottom {
+            // The content scrolls vertically, so only the strip with the grabber drags the panel.
+            return pan.location(in: adjustmentPanel).y < 30 && velocity.y > abs(velocity.x)
+        }
+        return velocity.x > abs(velocity.y)
+    }
+
+    // Lets this drag be decided before the content's scroll view claims the touch.
+    func gestureRecognizer(
+        _ recognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer
+    ) -> Bool {
+        other.view is UIScrollView
+    }
+
+    /// - Parameter fillsItsFrame: The view is sized by its constraints rather than by its content.
     private func host(_ content: some View, fillsItsFrame: Bool = false) -> UIView {
         let controller = UIHostingController(rootView: content)
         controller.sizingOptions = fillsItsFrame ? [] : .intrinsicContentSize
@@ -494,13 +693,12 @@ final class PlayerViewController: UIViewController {
                 host.alpha = showsFloating ? 1 : 0
             }
             self.splitPanel?.alpha = showsSplit ? 1 : 0
-            self.adjustmentPanel?.alpha = adjusting ? 1 : 0
         }
+        setAdjustmentPanelPresented(adjusting)
         for host in controlHosts {
             host.isUserInteractionEnabled = showsFloating
         }
         splitPanel?.isUserInteractionEnabled = showsSplit
-        adjustmentPanel?.isUserInteractionEnabled = adjusting
     }
 
     // MARK: - Diagnostics

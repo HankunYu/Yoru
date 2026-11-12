@@ -25,6 +25,13 @@ struct AdjustmentPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if model.adjustmentsRiseFromBottom {
+                Capsule()
+                    .fill(.white.opacity(0.35))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 8)
+                    .accessibilityHidden(true)
+            }
             HStack(spacing: 10) {
                 Picker("Adjustments", selection: $tab) {
                     ForEach(Tab.allCases, id: \.self) { tab in
@@ -35,7 +42,9 @@ struct AdjustmentPanel: View {
                 Button("Close", systemImage: "xmark") { model.hideAdjustments() }
                     .buttonStyle(GlassCircleButtonStyle())
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.top, model.adjustmentsRiseFromBottom ? 8 : 14)
+            .padding(.bottom, 14)
 
             ScrollView {
                 VStack(spacing: 22) {
@@ -50,10 +59,25 @@ struct AdjustmentPanel: View {
                 .padding(.bottom, 20)
             }
             .scrollIndicators(.hidden)
+            // Fades the content out toward the bottom edge instead of slicing through a row.
+            .mask {
+                LinearGradient(
+                    stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9),
+                            .init(color: .clear, location: 1)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foregroundStyle(.white)
-        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        // The scrolling content is cut off along the panel's outline, not its bounding box.
+        .clipShape(Self.outline)
+        .glassEffect(.regular, in: Self.outline)
+    }
+
+    /// Concentric with the display's own corners, whatever the panel's distance from them.
+    private static var outline: ConcentricRectangle {
+        ConcentricRectangle(corners: .concentric(minimum: 22), isUniform: true)
     }
 }
 

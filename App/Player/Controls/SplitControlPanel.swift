@@ -63,7 +63,13 @@ struct SplitControlPanel: View {
     }
 
     private var transport: some View {
-        HStack(spacing: 52) {
+        HStack(spacing: model.hasPrevious || model.hasNext ? 36 : 52) {
+            if model.hasPrevious || model.hasNext {
+                Button("Previous", systemImage: "backward.end.fill") { model.step(-1) }
+                    .font(.system(size: 24, weight: .medium))
+                    .disabled(!model.hasPrevious)
+                    .opacity(model.hasPrevious ? 1 : 0.35)
+            }
             Button("Back 10 Seconds", systemImage: "gobackward.10") { model.skip(-10) }
                 .font(.system(size: 32, weight: .medium))
 
@@ -77,6 +83,12 @@ struct SplitControlPanel: View {
 
             Button("Forward 10 Seconds", systemImage: "goforward.10") { model.skip(10) }
                 .font(.system(size: 32, weight: .medium))
+            if model.hasPrevious || model.hasNext {
+                Button("Next", systemImage: "forward.end.fill") { model.step(1) }
+                    .font(.system(size: 24, weight: .medium))
+                    .disabled(!model.hasNext)
+                    .opacity(model.hasNext ? 1 : 0.35)
+            }
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.plain)

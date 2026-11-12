@@ -15,6 +15,8 @@ struct MediaTrack: Identifiable, Equatable {
     let language: String?
     let codec: String?
     let isSelected: Bool
+    /// Loaded from a separate file; its `title` is then that file's name.
+    let isExternal: Bool
 
     var displayName: String {
         var parts: [String] = []
@@ -101,11 +103,26 @@ final class PlayerModel {
     private(set) var title = ""
     private(set) var isPaused = false
     private(set) var isBuffering = false
-    /// Bytes per second mpv is currently reading from the source.
-    private(set) var cacheSpeed: Int = 0
+    /// A file is being opened and has not shown its first frame yet.
+    private(set) var isLoading = false
+    /// Bytes per second mpv's cache is reading from the source.
+    private var cacheSpeed: Int = 0
+    /// Bytes per second read through app-served streams, measured while waiting.
+    private var streamSpeed: Int = 0
+    private var speedSamplingTask: Task<Void, Never>?
+
+    /// Whether the picture is waiting for data: opening a file, or refilling the cache.
+    var isWaiting: Bool { isLoading || isBuffering }
+    /// The rate data is arriving at while waiting; 0 when unknown.
+    var transferSpeed: Int { max(cacheSpeed, streamSpeed) }
     /// The time up to which the file is buffered ahead of the playback position.
     private(set) var bufferedEnd: Double = 0
     private(set) var isIdle = true
+    /// Playback stopped on the last frame of the file.
+    private(set) var hasReachedEnd = false
+    /// Whether the folder has a file before / after the current one.
+    var hasPrevious = false
+    var hasNext = false
     private(set) var duration: Double = 0
     private(set) var speed: Double = 1
     private(set) var tracks: [MediaTrack] = []
@@ -120,6 +137,9 @@ final class PlayerModel {
     private(set) var controlsVisible = true
     /// The adjustments panel is open, in place of the regular controls.
     private(set) var showsAdjustments = false
+    /// The adjustments panel rises from the bottom rather than sliding in from the side;
+    /// it then shows a grabber to drag it away by. Set by whoever lays the panel out.
+    var adjustmentsRiseFromBottom = false
     private var numbers: [PlayerNumber: Double] = [:]
     private var flags: [PlayerFlag: Bool] = [:]
     /// The second subtitle track shown above the main one, if any.
@@ -139,6 +159,13 @@ final class PlayerModel {
     /// `systemVolumeDidChange`.
     var adjustSystemVolume: ((Double) -> Void)?
     var onClose: (() -> Void)?
+    /// Moves to the neighboring file of the folder: -1 for the previous, 1 for the next.
+    var onStep: ((Int) -> Void)?
+    var onReachedEnd: (() -> Void)?
+    /// Set before loading to have the starting subtitle picked once the file is loaded.
+    var initialSubtitleChoice: PlaybackTarget.InitialSubtitleChoice?
+    // The file is loaded and the choice waits for the track list that reflects mpv's own.
+    private var awaitsInitialSubtitleChoice = false
 
     static let speeds: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
     static let diagnosticProperties = [
@@ -186,6 +213,7 @@ final class PlayerModel {
         player.observe("cache-speed", format: .int)
         player.observe("demuxer-cache-time", format: .double)
         player.observe("idle-active", format: .flag)
+        player.observe("eof-reached", format: .flag)
         player.observe("time-pos", format: .double)
         player.observe("duration", format: .double)
         player.observe("speed", format: .double)
@@ -205,7 +233,44 @@ final class PlayerModel {
         scheduleControlsHide()
     }
 
+    /// Called when a file starts opening.
+    func beginLoading() {
+        isLoading = true
+        updateSpeedSampling()
+    }
+
+    /// Whether the position is at the end or in the last stretch of the file (credits):
+    /// close enough that resuming there would be pointless, so it counts as finished.
+    var isNearEnd: Bool {
+        if hasReachedEnd { return true }
+        guard duration > 0 else { return false }
+        let tail = min(max(duration * 0.05, 10), 180)
+        return position >= duration - tail
+    }
+
+    /// Samples the app-served streams twice a second for as long as the picture waits.
+    private func updateSpeedSampling() {
+        guard isWaiting else {
+            speedSamplingTask?.cancel()
+            speedSamplingTask = nil
+            streamSpeed = 0
+            return
+        }
+        guard speedSamplingTask == nil else { return }
+        speedSamplingTask = Task { [weak self] in
+            var last = MPVStreamMeter.bytesRead
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                let now = MPVStreamMeter.bytesRead
+                self?.streamSpeed = Int(now - last) * 2
+                last = now
+            }
+        }
+    }
+
     func detach() {
+        speedSamplingTask?.cancel()
         hideControlsTask?.cancel()
         hideOSDTask?.cancel()
         seekFlushTask?.cancel()
@@ -224,10 +289,37 @@ final class PlayerModel {
             handleMessage(arguments)
         case .playbackRestart:
             // Fires after every seek and at start.
+            isLoading = false
+            updateSpeedSampling()
             nowPlayingReferencePosition = position
             seekDidComplete()
-        case .fileLoaded, .endFile, .videoReconfig, .log, .shutdown:
+        case .fileLoaded:
+            // mpv has made its own selection by now; the track list reporting it is still
+            // on its way, so the choice is made when that arrives.
+            awaitsInitialSubtitleChoice = initialSubtitleChoice != nil
+        case .endFile:
+            // Covers a file that failed to open; a new one sets it again.
+            isLoading = false
+            updateSpeedSampling()
+        case .videoReconfig, .log, .shutdown:
             break
+        }
+    }
+
+    private func chooseInitialSubtitle() {
+        guard awaitsInitialSubtitleChoice, let choice = initialSubtitleChoice else { return }
+        awaitsInitialSubtitleChoice = false
+        initialSubtitleChoice = nil
+        let candidates = subtitleTracks.map { track in
+            SubtitleChooser.Candidate(
+                id: track.id,
+                isSelected: track.isSelected,
+                language: track.language,
+                externalName: track.isExternal ? track.title : nil
+            )
+        }
+        if let id = SubtitleChooser.choice(among: candidates, codes: choice.codes, stem: choice.stem) {
+            player?.setProperty("sid", String(id))
         }
     }
 
@@ -235,6 +327,11 @@ final class PlayerModel {
 
     func togglePause() {
         player?.command("cycle", "pause")
+        keepControlsVisible()
+    }
+
+    func step(_ offset: Int) {
+        onStep?(offset)
         keepControlsVisible()
     }
 
@@ -486,10 +583,18 @@ final class PlayerModel {
             scheduleControlsHide()
         case "paused-for-cache":
             isBuffering = value.flagValue ?? false
+            updateSpeedSampling()
         case "cache-speed":
             cacheSpeed = value.intValue ?? 0
         case "demuxer-cache-time":
             bufferedEnd = value.doubleValue ?? 0
+        case "eof-reached":
+            let reached = value.flagValue ?? false
+            guard reached != hasReachedEnd else { return }
+            hasReachedEnd = reached
+            if reached {
+                onReachedEnd?()
+            }
         case "idle-active":
             isIdle = value.flagValue ?? true
         case "time-pos":
@@ -530,6 +635,7 @@ final class PlayerModel {
             }
         case "track-list":
             tracks = (value.arrayValue ?? []).compactMap(MediaTrack.init)
+            chooseInitialSubtitle()
         case "secondary-sid":
             secondarySubtitleID = value.stringValue.flatMap(Int.init)
         default:
@@ -636,7 +742,8 @@ private extension MediaTrack {
             title: value["title"]?.stringValue,
             language: value["lang"]?.stringValue,
             codec: value["codec"]?.stringValue,
-            isSelected: value["selected"]?.flagValue ?? false
+            isSelected: value["selected"]?.flagValue ?? false,
+            isExternal: value["external"]?.flagValue ?? false
         )
     }
 }

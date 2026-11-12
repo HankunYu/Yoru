@@ -254,3 +254,23 @@ speed, A-B loop).
   default from the panel.
 - **Resume safety**: mpv deletes a resume file when the file is opened and rewrites it on
   quit, so the app also saves every 20 seconds and whenever it stops being active.
+
+## Folder playback, endings and first subtitles
+
+- **Queue**: a file opened from the browser carries a `PlaybackQueue`: the files of its
+  kind in its folder, in the browser's order. Previous and next load into the running
+  player; `reset-on-next-file` clears track choices, delays and loop points between files.
+- **At the end**: `at-end` in `yoru.conf` is `next` (default), `stay` or `close`. mpv keeps
+  the last frame (`keep-open`) and the app acts on `eof-reached`.
+- **Finished files**: a position at the end or in the last stretch (5% of the duration,
+  between 10 seconds and 3 minutes) is not saved, and an earlier resume file is deleted, so
+  a finished file starts over.
+- **First subtitle**: subtitles the app supplies carry no language, so mpv's `slang` cannot
+  pick them. On a first viewing `SubtitleChooser` ranks them by the language tag in their
+  file name against the preferred languages and switches when an external one fits better.
+- **Loading**: from opening a file to its first frame the picture shows a spinner and the
+  rate measured on app-served streams (`MPVStreamMeter`); mpv's `cache-speed` only starts
+  once its cache does.
+- **Adjustments panel**: slides in from the trailing edge or the bottom and can be dragged
+  away. It keeps one margin to every display edge, ignores the safe area and steps aside
+  only for an occlusion that overlaps it, and its outline is concentric with the display.

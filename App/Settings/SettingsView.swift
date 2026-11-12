@@ -50,7 +50,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func page(for category: SettingsCategory) -> some View {
         switch category {
-        case .playback: PlaybackSettings(player: $player)
+        case .playback: PlaybackSettings(player: $player, interface: $interface)
         case .video: VideoSettings(player: $player)
         case .audio: AudioSettings(player: $player)
         case .subtitles: SubtitleSettings(player: $player)

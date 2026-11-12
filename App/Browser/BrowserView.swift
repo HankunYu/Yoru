@@ -98,7 +98,7 @@ struct BrowserView: View {
                     }
                     .pickerStyle(.inline)
                     Picker("Sort By", selection: $sortOrder) {
-                        Label("Name", systemImage: "textformat").tag(BrowserSortOrder.name)
+                        Label("Name", systemImage: "tag").tag(BrowserSortOrder.name)
                         Label("Date", systemImage: "calendar").tag(BrowserSortOrder.date)
                         Label("Size", systemImage: "internaldrive").tag(BrowserSortOrder.size)
                     }
@@ -178,7 +178,9 @@ struct BrowserView: View {
         if item.isDirectory {
             path.append(item)
         } else if item.mediaKind.isPlayable {
-            playing = PlaybackTarget(item: item, siblings: items)
+            var target = PlaybackTarget(item: item, siblings: items)
+            target.queue = PlaybackQueue(startingAt: item, among: items)
+            playing = target
         }
     }
 

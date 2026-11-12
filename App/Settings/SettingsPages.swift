@@ -5,6 +5,7 @@ import SwiftUI
 
 struct PlaybackSettings: View {
     @Binding var player: PlayerOptions
+    @Binding var interface: YoruOptions
     @State private var resumePositionCount = ConfigDirectory.resumePositionCount
     @State private var isConfirmingClear = false
 
@@ -42,9 +43,10 @@ struct PlaybackSettings: View {
                 }
             }
             Section {
-                Picker(selection: $player.closesAtEnd) {
-                    Text("Stay on Last Frame").tag(false)
-                    Text("Close Player").tag(true)
+                Picker(selection: $interface.endAction) {
+                    Text("Play Next").tag(EndAction.next)
+                    Text("Stay on Last Frame").tag(EndAction.stay)
+                    Text("Close Player").tag(EndAction.close)
                 } label: {
                     SettingLabel("When a Video Ends", detail: nil, symbol: "stop.circle")
                 }

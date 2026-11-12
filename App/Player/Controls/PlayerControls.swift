@@ -68,7 +68,13 @@ struct PlayerTransport: View {
     let model: PlayerModel
 
     var body: some View {
-        HStack(spacing: 44) {
+        HStack(spacing: model.hasPrevious || model.hasNext ? 30 : 44) {
+            if model.hasPrevious || model.hasNext {
+                Button("Previous", systemImage: "backward.end.fill") { model.step(-1) }
+                    .font(.system(size: 22, weight: .medium))
+                    .disabled(!model.hasPrevious)
+                    .opacity(model.hasPrevious ? 1 : 0.35)
+            }
             Button("Back 10 Seconds", systemImage: "gobackward.10") { model.skip(-10) }
                 .font(.system(size: 30, weight: .medium))
 
@@ -81,6 +87,12 @@ struct PlayerTransport: View {
 
             Button("Forward 10 Seconds", systemImage: "goforward.10") { model.skip(10) }
                 .font(.system(size: 30, weight: .medium))
+            if model.hasPrevious || model.hasNext {
+                Button("Next", systemImage: "forward.end.fill") { model.step(1) }
+                    .font(.system(size: 22, weight: .medium))
+                    .disabled(!model.hasNext)
+                    .opacity(model.hasNext ? 1 : 0.35)
+            }
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.plain)

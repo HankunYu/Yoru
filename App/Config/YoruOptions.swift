@@ -2,6 +2,16 @@ import Foundation
 
 /// Options for Yoru's own interface, stored in `script-opts/yoru.conf` in the config
 /// directory: the same `key=value` format and location mpv scripts use for theirs.
+/// What the player does when a video reaches its end.
+enum EndAction: String, CaseIterable {
+    /// Play the next file of the folder; stay on the last frame when there is none.
+    case next
+    /// Stay on the last frame.
+    case stay
+    /// Close the player.
+    case close
+}
+
 struct YoruOptions: Equatable {
     /// Seek between keyframes while dragging the seek bar; exact only on release.
     var seekbarKeyframes = true
@@ -18,6 +28,7 @@ struct YoruOptions: Equatable {
     var swapsGestureSides = false
     /// Playback speed while a finger is held down.
     var holdSpeed = 2.0
+    var endAction = EndAction.next
 
     static let fileURL = ConfigDirectory.url.appending(path: "script-opts/yoru.conf")
 
@@ -45,6 +56,9 @@ struct YoruOptions: Equatable {
         if let value = file.value(for: "hold-speed"), let speed = Double(value), speed > 0 {
             options.holdSpeed = speed
         }
+        if let value = file.value(for: "at-end"), let action = EndAction(rawValue: value) {
+            options.endAction = action
+        }
         return options
     }
 
@@ -57,6 +71,7 @@ struct YoruOptions: Equatable {
         file.set("volume-gesture", to: Self.flag(volumeGesture))
         file.set("swap-gesture-sides", to: Self.flag(swapsGestureSides))
         file.set("hold-speed", to: String(format: "%g", holdSpeed))
+        file.set("at-end", to: endAction.rawValue)
         file.save()
     }
 
