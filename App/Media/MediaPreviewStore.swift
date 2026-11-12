@@ -34,6 +34,25 @@ final class MediaPreviewStore: Sendable {
     private init() {
         memory.countLimit = 300
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        forgetFailuresIfDecodersChanged()
+    }
+
+    /// Bumped whenever the bundled libmpv gains formats it can decode. Files remembered
+    /// as having no picture get another try then; thumbnails that exist are kept.
+    private static let decoderGeneration = 2
+    private static let decoderGenerationKey = "previews.decoderGeneration"
+
+    private func forgetFailuresIfDecodersChanged() {
+        let defaults = UserDefaults.standard
+        guard defaults.integer(forKey: Self.decoderGenerationKey) != Self.decoderGeneration else { return }
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "json" {
+            let image = file.deletingPathExtension().appendingPathExtension("jpg")
+            if !FileManager.default.fileExists(atPath: image.path) {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+        defaults.set(Self.decoderGeneration, forKey: Self.decoderGenerationKey)
     }
 
     /// Whether files on servers get thumbnails. Each one costs a connection and a few

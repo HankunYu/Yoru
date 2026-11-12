@@ -369,3 +369,19 @@ speed, A-B loop).
   adding the PNG, APNG, WebP, GIF, BMP and TIFF decoders, GIF and APNG demuxers, and the
   dynaudnorm, loudnorm, acompressor, cropdetect and crop filters. Images follow that list;
   HEIC, JPEG XL and AVIF are not decoded. No volume normalization switch exists yet.
+
+## Streams served to mpv
+
+- **Every `smb://` goes through the app.** Pasted links are registered as a stream
+  protocol too, ahead of mpv's own handler, so all libsmbclient use sits behind
+  `SMBConnection`'s lock. A link must name a file; servers and shares are browsed by
+  adding the server.
+- **`BlockCachedStream`** wraps every app-served stream: 1 MB blocks, the 8 most recently
+  used kept. A seek only moves a position. Needed for files whose audio and video are
+  not interleaved: FFmpeg seeks between the two regions for nearly every packet and,
+  for non-local input, refills a buffer of up to 16 MB after each seek. WebDAV is read
+  by FFmpeg's own HTTP code and does not pass through here.
+- **Images are recognized by content** (fork release `yoru-0.41.0-3` adds FFmpeg's image
+  pipe demuxers); before, mpv chose the decoder from the file extension alone.
+- **Remembered thumbnail failures expire** when `MediaPreviewStore.decoderGeneration`
+  changes; bump it whenever the fork's FFmpeg gains formats.
