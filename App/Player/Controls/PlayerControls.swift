@@ -45,7 +45,7 @@ enum ControlMetrics {
 }
 
 /// Overlays that are rarely needed: mpv's statistics and Yoru's diagnostics.
-private struct PlaybackMenu: View {
+struct PlaybackMenu: View {
     let model: PlayerModel
 
     var body: some View {
@@ -135,32 +135,15 @@ private struct QuickPanel: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            Menu {
-                Toggle("Off", isOn: Binding(
-                    get: { !model.subtitleTracks.contains(where: \.isSelected) },
-                    set: { _ in model.select(nil, kind: .sub) }
-                ))
-                trackItems(model.subtitleTracks, kind: .sub)
-            } label: {
+            SubtitleMenu(model: model) {
                 item(Image(systemName: "captions.bubble"), label: "Subtitles")
             }
-
             if model.audioTracks.count > 1 {
-                Menu {
-                    trackItems(model.audioTracks, kind: .audio)
-                } label: {
+                AudioMenu(model: model) {
                     item(Image(systemName: "waveform"), label: "Audio")
                 }
             }
-
-            Menu {
-                ForEach(PlayerModel.speeds, id: \.self) { speed in
-                    Toggle(PlayerModel.format(speed: speed), isOn: Binding(
-                        get: { abs(model.speed - speed) < 0.001 },
-                        set: { _ in model.setSpeed(speed) }
-                    ))
-                }
-            } label: {
+            SpeedMenu(model: model) {
                 item(
                     Text(PlayerModel.format(speed: model.speed))
                         .font(.footnote.weight(.semibold).monospacedDigit()),
@@ -168,7 +151,6 @@ private struct QuickPanel: View {
                 )
             }
         }
-        .menuOrder(.fixed)
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .frame(height: 44)
@@ -183,8 +165,68 @@ private struct QuickPanel: View {
             .contentShape(Rectangle())
             .accessibilityLabel(label)
     }
+}
 
-    private func trackItems(_ tracks: [MediaTrack], kind: MediaTrack.Kind) -> some View {
+/// Picks the subtitle track, or none.
+struct SubtitleMenu<Label: View>: View {
+    let model: PlayerModel
+    @ViewBuilder let label: Label
+
+    var body: some View {
+        Menu {
+            Toggle("Off", isOn: Binding(
+                get: { !model.subtitleTracks.contains(where: \.isSelected) },
+                set: { _ in model.select(nil, kind: .sub) }
+            ))
+            TrackItems(model: model, tracks: model.subtitleTracks, kind: .sub)
+        } label: {
+            label
+        }
+        .menuOrder(.fixed)
+    }
+}
+
+/// Picks the audio track.
+struct AudioMenu<Label: View>: View {
+    let model: PlayerModel
+    @ViewBuilder let label: Label
+
+    var body: some View {
+        Menu {
+            TrackItems(model: model, tracks: model.audioTracks, kind: .audio)
+        } label: {
+            label
+        }
+        .menuOrder(.fixed)
+    }
+}
+
+/// Picks the playback speed.
+struct SpeedMenu<Label: View>: View {
+    let model: PlayerModel
+    @ViewBuilder let label: Label
+
+    var body: some View {
+        Menu {
+            ForEach(PlayerModel.speeds, id: \.self) { speed in
+                Toggle(PlayerModel.format(speed: speed), isOn: Binding(
+                    get: { abs(model.speed - speed) < 0.001 },
+                    set: { _ in model.setSpeed(speed) }
+                ))
+            }
+        } label: {
+            label
+        }
+        .menuOrder(.fixed)
+    }
+}
+
+private struct TrackItems: View {
+    let model: PlayerModel
+    let tracks: [MediaTrack]
+    let kind: MediaTrack.Kind
+
+    var body: some View {
         ForEach(tracks) { track in
             Toggle(track.displayName, isOn: Binding(
                 get: { track.isSelected },

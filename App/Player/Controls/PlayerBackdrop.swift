@@ -9,9 +9,11 @@ struct PlayerBackdrop: View {
 
     var body: some View {
         ZStack {
+            // The scrims keep floating controls legible; controls with their own area
+            // leave the picture untouched.
             scrims
-                .opacity(model.controlsVisible ? 1 : 0)
-                .animation(.easeInOut(duration: 0.25), value: model.controlsVisible)
+                .opacity(showsScrims ? 1 : 0)
+                .animation(.easeInOut(duration: 0.25), value: showsScrims)
 
             if model.isBuffering {
                 ProgressView()
@@ -41,6 +43,10 @@ struct PlayerBackdrop: View {
             .animation(.snappy(duration: 0.2), value: model.osd != nil)
         }
         .ignoresSafeArea()
+    }
+
+    private var showsScrims: Bool {
+        model.controlsVisible && !model.hasDedicatedControlArea
     }
 
     private var scrims: some View {

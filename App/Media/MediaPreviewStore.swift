@@ -49,6 +49,23 @@ final class MediaPreviewStore: Sendable {
         }
     }
 
+    /// Bytes the cached thumbnails take on disk.
+    func diskUsage() -> Int64 {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey]
+        )) ?? []
+        return files.reduce(0) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    }
+
+    /// Deletes every cached thumbnail; they are generated again when next shown.
+    func clear() {
+        memory.removeAllObjects()
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for file in files {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     /// Pauses generation, e.g. during playback, which should not compete for the CPU.
     /// Must be balanced by `resume()`.
     func suspend() { queue.suspend() }

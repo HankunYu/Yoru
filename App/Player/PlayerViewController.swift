@@ -17,9 +17,19 @@ final class PlayerViewController: UIViewController {
     private var nowPlaying: NowPlayingSession?
     private var systemVolume: SystemVolume?
     private var controlHosts: [UIView] = []
+    // Shown instead of `controlHosts` while the controls have their own half of the display.
+    private var splitPanel: UIView?
     // The full-width control rows and their trailing/leading edge constraints, adjusted by
     // `updateControlInsets()` to step around occlusions.
     private var controlRows: [(host: UIView, leading: NSLayoutConstraint, trailing: NSLayoutConstraint)] = []
+    // The area the controls are laid out in: the safe area, or one half when half-folded.
+    private let controlsGuide = UILayoutGuide()
+    private var controlsGuideTop: NSLayoutConstraint?
+    private var controlsGuideBottom: NSLayoutConstraint?
+    // The backdrop (messages, buffering) follows the picture.
+    private var backdropTop: NSLayoutConstraint?
+    private var backdropBottom: NSLayoutConstraint?
+    private var appliedMargins = VideoMargins()
     private var savedVideoTrack = "auto"
     private var currentVideoTrack: String?
     private var edrHeadroom: CGFloat = 1
@@ -168,6 +178,7 @@ final class PlayerViewController: UIViewController {
         systemVolume?.invalidate()
         systemVolume = nil
         model.detach()
+        OrientationLock.set(.all, in: view.window?.windowScene)
         // The resume position is written as mpv shuts down.
         player?.destroy {
             Task { @MainActor in WatchHistory.shared.reload() }
@@ -175,15 +186,10 @@ final class PlayerViewController: UIViewController {
         player = nil
     }
 
-    /// Installs the bundled touch bindings as a default input section, so bindings for
+    /// Installs the built-in touch bindings as a default input section, so bindings for
     /// the same keys in the user's input.conf win.
     private func loadTouchBindings(into player: MPVPlayer) {
-        guard let url = Bundle.main.url(forResource: "touch", withExtension: "conf"),
-              let bindings = try? String(contentsOf: url, encoding: .utf8) else {
-            Log.player.error("touch.conf missing from bundle")
-            return
-        }
-        player.command("define-section", "yoru-touch", bindings, "default")
+        player.command("define-section", "yoru-touch", TouchBindings.section(for: YoruOptions.load()), "default")
         player.command("enable-section", "yoru-touch")
     }
 
@@ -205,6 +211,9 @@ final class PlayerViewController: UIViewController {
             // os.Logger doesn't reach `devicectl --console`; mirror mpv logs to stdout while debugging.
             print("[mpv/\(prefix)] \(level): \(text)", terminator: "")
             #endif
+        case .endFile(.endOfFile):
+            // Only reached with `keep-open=no`; otherwise mpv pauses on the last frame.
+            model.onClose?()
         case .fileLoaded:
             if !hasAttachedSubtitles {
                 hasAttachedSubtitles = true
@@ -220,17 +229,59 @@ final class PlayerViewController: UIViewController {
 
     // MARK: - Posture
 
-    private func apply(_ posture: Posture) {
-        let bottomRatio: Double
-        switch posture {
-        case .tabletop(let fold):
-            // Push the picture above the fold; the controls stay in the lower half.
-            let height = playerView.bounds.height
-            bottomRatio = height > 0 ? max(0, min(1, (height - fold.minY) / height)) : 0
-        case .flat, .closed:
-            bottomRatio = 0
+    private struct VideoMargins: Equatable {
+        var top: CGFloat = 0
+        var bottom: CGFloat = 0
+    }
+
+    private static func update(_ constraint: NSLayoutConstraint?, to constant: CGFloat) {
+        if let constraint, constraint.constant != constant {
+            constraint.constant = constant
         }
-        player?.setProperty("video-margin-ratio-bottom", String(bottomRatio))
+    }
+
+    private func apply(_ posture: Posture) {
+        let scene = view.window?.windowScene
+        // Half-folded, the fold should lie across: the player turns to portrait, either way up.
+        if case .halfFolded = posture {
+            OrientationLock.set([.portrait, .portraitUpsideDown], in: scene)
+        } else {
+            OrientationLock.set(.all, in: scene)
+        }
+        updateSplit()
+    }
+
+    /// Lays the player out for the current posture: half-folded with a horizontal fold, the
+    /// picture takes the upper half and the controls the lower; otherwise the picture
+    /// fills the view and the controls float over it.
+    private func updateSplit() {
+        let bounds = view.bounds
+        var videoRegion: CGRect?
+        var controlRegion: CGRect?
+        if case .halfFolded(let fold) = postureMonitor?.posture, fold.width > fold.height, bounds.height > 0 {
+            videoRegion = CGRect(x: 0, y: 0, width: bounds.width, height: fold.minY)
+            controlRegion = CGRect(x: 0, y: fold.maxY, width: bounds.width, height: bounds.height - fold.maxY)
+        }
+
+        let insets = view.safeAreaInsets
+        let video = videoRegion ?? bounds
+        let controls = controlRegion ?? bounds
+        // Each region keeps the safe-area inset of the screen edge it touches.
+        // This runs on every layout pass, so nothing is touched unless it changed.
+        Self.update(controlsGuideTop, to: max(controls.minY, insets.top))
+        Self.update(controlsGuideBottom, to: -max(bounds.maxY - controls.maxY, insets.bottom))
+        Self.update(backdropTop, to: video.minY)
+        Self.update(backdropBottom, to: -(bounds.maxY - video.maxY))
+
+        let height = max(bounds.height, 1)
+        let margins = VideoMargins(top: video.minY / height, bottom: (bounds.maxY - video.maxY) / height)
+        if margins != appliedMargins, let player {
+            appliedMargins = margins
+            player.setProperty("video-margin-ratio-top", String(Double(margins.top)))
+            player.setProperty("video-margin-ratio-bottom", String(Double(margins.bottom)))
+        }
+        touchInput?.pictureRegion = videoRegion
+        model.setDedicatedControlArea(controlRegion != nil)
     }
 
     // MARK: - App lifecycle
@@ -263,8 +314,24 @@ final class PlayerViewController: UIViewController {
         let transport = host(PlayerTransport(model: model))
         let seekPanel = host(PlayerBottomBar(model: model))
         controlHosts = [topBar, transport, seekPanel]
+        let splitPanel = host(
+            SplitControlPanel(model: model) { [weak self] isLeftHalf, travel in
+                self?.touchInput?.verticalDrag(isLeftHalf: isLeftHalf, travel: travel)
+            },
+            fillsItsFrame: true
+        )
+        self.splitPanel = splitPanel
 
-        let guide = view.safeAreaLayoutGuide
+        view.addLayoutGuide(controlsGuide)
+        let guide = controlsGuide
+        let guideTop = guide.topAnchor.constraint(equalTo: view.topAnchor)
+        let guideBottom = guide.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        controlsGuideTop = guideTop
+        controlsGuideBottom = guideBottom
+        let backdropTop = backdrop.topAnchor.constraint(equalTo: view.topAnchor)
+        let backdropBottom = backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        self.backdropTop = backdropTop
+        self.backdropBottom = backdropBottom
         // Horizontally both rows span the whole view, not the safe area. On the iPhone Duo's
         // outer display the safe area reserves a full-height 84pt strip for a camera that
         // only occupies one corner; honoring it would leave every row visibly off-center.
@@ -280,15 +347,25 @@ final class PlayerViewController: UIViewController {
             playerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             playerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
-            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
-            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            backdropTop,
+            backdropBottom,
             backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
             topBar.topAnchor.constraint(equalTo: guide.topAnchor),
 
             transport.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            transport.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            transport.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
+
+            splitPanel.topAnchor.constraint(equalTo: guide.topAnchor),
+            splitPanel.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
+            splitPanel.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+            splitPanel.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+
+            guideTop,
+            guideBottom,
+            guide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            guide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
             seekPanel.bottomAnchor.constraint(equalTo: guide.bottomAnchor),
 
@@ -297,7 +374,13 @@ final class PlayerViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        updateSplit()
         updateControlInsets()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        view.setNeedsLayout()
     }
 
     /// Insets each control row past the active occlusion regions (camera housing and the
@@ -319,9 +402,10 @@ final class PlayerViewController: UIViewController {
         }
     }
 
-    private func host(_ content: some View) -> UIView {
+    /// - Parameter fillsItsFrame: The view is sized by its constraints rather than by its content.
+    private func host(_ content: some View, fillsItsFrame: Bool = false) -> UIView {
         let controller = UIHostingController(rootView: content)
-        controller.sizingOptions = .intrinsicContentSize
+        controller.sizingOptions = fillsItsFrame ? [] : .intrinsicContentSize
         controller.safeAreaRegions = []
         controller.view.backgroundColor = .clear
         controller.view.translatesAutoresizingMaskIntoConstraints = false
@@ -331,22 +415,27 @@ final class PlayerViewController: UIViewController {
         return controller.view
     }
 
-    /// Fades the interactive controls with `model.controlsVisible`. Hidden controls must
-    /// not swallow touches, hence UIKit-level alpha and interaction rather than SwiftUI opacity.
+    /// Fades the interactive controls with the model's state: the floating ones with
+    /// `controlsVisible`, replaced by the split panel while the controls have their own
+    /// area. Hidden controls must not swallow touches, hence UIKit-level alpha and
+    /// interaction rather than SwiftUI opacity.
     private func trackControlsVisibility() {
-        let visible = withObservationTracking {
-            model.controlsVisible
+        let (visible, dedicated) = withObservationTracking {
+            (model.controlsVisible, model.hasDedicatedControlArea)
         } onChange: { [weak self] in
             Task { @MainActor in self?.trackControlsVisibility() }
         }
+        let showsFloating = visible && !dedicated
         UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
             for host in self.controlHosts {
-                host.alpha = visible ? 1 : 0
+                host.alpha = showsFloating ? 1 : 0
             }
+            self.splitPanel?.alpha = dedicated ? 1 : 0
         }
         for host in controlHosts {
-            host.isUserInteractionEnabled = visible
+            host.isUserInteractionEnabled = showsFloating
         }
+        splitPanel?.isUserInteractionEnabled = dedicated
     }
 
     // MARK: - Diagnostics

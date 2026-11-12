@@ -51,6 +51,17 @@ struct PlayerOptions: Equatable {
     var usesHardwareDecoding = true
     var usesHighQualityScaling = false
     var resumesPlayback = true
+    /// `sub-font`; nil for the bundled default.
+    var subtitleFont: String?
+    /// `sub-pos`: 100 is the bottom of the picture, lower values move subtitles up.
+    var subtitlePosition = 100
+    /// HDR video goes to the display as HDR; off converts it to SDR.
+    var outputsHDR = true
+    var debands = false
+    /// Leave the player when a video ends, instead of pausing on its last frame.
+    var closesAtEnd = false
+    /// `demuxer-max-bytes` in MiB; nil for mpv's default.
+    var readAheadMegabytes: Int?
 
     static let fileURL = ConfigDirectory.url.appending(path: "mpv.conf")
 
@@ -71,6 +82,16 @@ struct PlayerOptions: Equatable {
         options.usesHighQualityScaling = file.value(for: "profile") == "high-quality"
         if let value = file.value(for: "save-position-on-quit") {
             options.resumesPlayback = value != "no"
+        }
+        options.subtitleFont = file.value(for: "sub-font")
+        if let value = file.value(for: "sub-pos"), let position = Double(value) {
+            options.subtitlePosition = Int(position.rounded())
+        }
+        options.outputsHDR = file.value(for: "target-colorspace-hint") != "no"
+        options.debands = file.value(for: "deband") == "yes"
+        options.closesAtEnd = file.value(for: "keep-open") == "no"
+        if let value = file.value(for: "demuxer-max-bytes"), value.hasSuffix("MiB") {
+            options.readAheadMegabytes = Int(value.dropLast(3))
         }
         return options
     }
@@ -100,6 +121,26 @@ struct PlayerOptions: Equatable {
         }
         if resumesPlayback != previous.resumesPlayback {
             file.set("save-position-on-quit", to: resumesPlayback ? "yes" : "no")
+        }
+        if subtitleFont != previous.subtitleFont {
+            file.set("sub-font", to: subtitleFont.map { "\"\($0)\"" })
+        }
+        if subtitlePosition != previous.subtitlePosition {
+            file.set("sub-pos", to: subtitlePosition == 100 ? nil : String(subtitlePosition))
+        }
+        // For the three below the app's own default is the "on" state, so that state is
+        // expressed by leaving the line out.
+        if outputsHDR != previous.outputsHDR {
+            file.set("target-colorspace-hint", to: outputsHDR ? nil : "no")
+        }
+        if debands != previous.debands {
+            file.set("deband", to: debands ? "yes" : nil)
+        }
+        if closesAtEnd != previous.closesAtEnd {
+            file.set("keep-open", to: closesAtEnd ? "no" : nil)
+        }
+        if readAheadMegabytes != previous.readAheadMegabytes {
+            file.set("demuxer-max-bytes", to: readAheadMegabytes.map { "\($0)MiB" })
         }
         file.save()
     }

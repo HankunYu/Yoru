@@ -7,24 +7,24 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var player = PlayerOptions.load()
     @State private var interface = YoruOptions.load()
-    @State private var resumePositionCount = ConfigDirectory.resumePositionCount
-    @State private var isConfirmingClear = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                languageSection
-                subtitleSection
-                videoSection
-                playbackSection
-                seekingSection
+            SettingsForm(title: "Settings") {
+                Section {
+                    ForEach(SettingsCategory.allCases) { category in
+                        NavigationLink {
+                            page(for: category)
+                        } label: {
+                            SettingLabel(category.title, detail: category.summary, symbol: category.symbol)
+                        }
+                    }
+                } footer: {
+                    Text("Options are saved to the configuration files below and apply to the next video you open.")
+                }
                 configurationSection
                 aboutSection
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.background)
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -45,134 +45,18 @@ struct SettingsView: View {
         if loadedPlayer != player { player = loadedPlayer }
         let loadedInterface = YoruOptions.load()
         if loadedInterface != interface { interface = loadedInterface }
-        resumePositionCount = ConfigDirectory.resumePositionCount
     }
 
-    // MARK: - Sections
-
-    private var languageSection: some View {
-        Section {
-            LanguagePicker("Subtitle Language", symbol: "captions.bubble", selection: $player.subtitleLanguage)
-            LanguagePicker("Audio Language", symbol: "waveform", selection: $player.audioLanguage)
-        } header: {
-            Text("Languages")
-        } footer: {
-            Text("Which track to pick when a video has several.")
+    @ViewBuilder
+    private func page(for category: SettingsCategory) -> some View {
+        switch category {
+        case .playback: PlaybackSettings(player: $player)
+        case .video: VideoSettings(player: $player)
+        case .audio: AudioSettings(player: $player)
+        case .subtitles: SubtitleSettings(player: $player)
+        case .gestures: GestureSettings(interface: $interface)
+        case .storage: StorageSettings(player: $player)
         }
-        .listRowBackground(Theme.card)
-    }
-
-    private var subtitleSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    SettingLabel("Subtitle Size", detail: nil, symbol: "textformat.size")
-                    Spacer()
-                    Text(player.subtitleScale, format: .percent.precision(.fractionLength(0)))
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Slider(value: $player.subtitleScale, in: 0.5...2, step: 0.05)
-            }
-            .padding(.vertical, 4)
-            Toggle(isOn: $player.loadsExternalSubtitles) {
-                SettingLabel(
-                    "Load External Subtitles",
-                    detail: "Use subtitle files next to the video with a matching name.",
-                    symbol: "doc.badge.plus"
-                )
-            }
-        } header: {
-            Text("Subtitles")
-        }
-        .listRowBackground(Theme.card)
-    }
-
-    private var videoSection: some View {
-        Section {
-            Toggle(isOn: $player.usesHardwareDecoding) {
-                SettingLabel(
-                    "Hardware Decoding",
-                    detail: "Decode with the device's video hardware. Turn off only to troubleshoot.",
-                    symbol: "cpu"
-                )
-            }
-            Toggle(isOn: $player.usesHighQualityScaling) {
-                SettingLabel(
-                    "High Quality Scaling",
-                    detail: "Sharper scaling filters. Uses more power.",
-                    symbol: "sparkles"
-                )
-            }
-        } header: {
-            Text("Video")
-        }
-        .listRowBackground(Theme.card)
-    }
-
-    private var playbackSection: some View {
-        Section {
-            Toggle(isOn: $player.resumesPlayback) {
-                SettingLabel(
-                    "Resume Playback",
-                    detail: "Continue each video where you left off.",
-                    symbol: "arrow.clockwise"
-                )
-            }
-            Button(role: .destructive) {
-                isConfirmingClear = true
-            } label: {
-                HStack {
-                    SettingLabel("Clear Resume Positions", detail: nil, symbol: "clock.arrow.circlepath")
-                    Spacer()
-                    Text("\(resumePositionCount)")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
-            }
-            .disabled(resumePositionCount == 0)
-            .confirmationDialog(
-                "Forget where every video was left off?",
-                isPresented: $isConfirmingClear,
-                titleVisibility: .visible
-            ) {
-                Button("Clear Resume Positions", role: .destructive) {
-                    ConfigDirectory.clearResumePositions()
-                    resumePositionCount = ConfigDirectory.resumePositionCount
-                }
-            }
-        } header: {
-            Text("Playback")
-        }
-        .listRowBackground(Theme.card)
-    }
-
-    private var seekingSection: some View {
-        Section {
-            Toggle(isOn: $interface.seekbarKeyframes) {
-                SettingLabel(
-                    "Fast Seek Bar",
-                    detail: "Jump between keyframes while dragging; land exactly on release.",
-                    symbol: "forward.frame"
-                )
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    SettingLabel("Swipe Sensitivity", detail: nil, symbol: "hand.draw")
-                    Spacer()
-                    Text(String(format: "%.2f s / pt", interface.swipeSeekRate))
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Slider(value: $interface.swipeSeekRate, in: 0.03...0.4, step: 0.01)
-            }
-            .padding(.vertical, 4)
-        } header: {
-            Text("Seeking")
-        } footer: {
-            Text("Options above are saved to the configuration files below and apply to the next video you open.")
-        }
-        .listRowBackground(Theme.card)
     }
 
     private var configurationSection: some View {
@@ -189,7 +73,6 @@ struct SettingsView: View {
         } footer: {
             Text("Edit the files directly for anything not listed above. They are the same files mpv uses on a desktop, and live in the mpv folder inside YORU in the Files app, next to fonts and scripts.")
         }
-        .listRowBackground(Theme.card)
     }
 
     private var aboutSection: some View {
@@ -199,7 +82,6 @@ struct SettingsView: View {
         } header: {
             Text("About")
         }
-        .listRowBackground(Theme.card)
     }
 
     private static var version: String {
@@ -210,76 +92,47 @@ struct SettingsView: View {
     }
 }
 
-/// Picks a track language; a hand-written list in the file shows up as an extra entry.
-private struct LanguagePicker: View {
-    let title: LocalizedStringKey
-    let symbol: String
-    @Binding var selection: LanguagePreference
+/// The pages Settings is divided into.
+private enum SettingsCategory: CaseIterable, Identifiable {
+    case playback
+    case video
+    case audio
+    case subtitles
+    case gestures
+    case storage
 
-    init(_ title: LocalizedStringKey, symbol: String, selection: Binding<LanguagePreference>) {
-        self.title = title
-        self.symbol = symbol
-        _selection = selection
-    }
+    var id: Self { self }
 
-    var body: some View {
-        Picker(selection: $selection) {
-            ForEach(options) { option in
-                Text(name(of: option)).tag(option)
-            }
-        } label: {
-            SettingLabel(title, detail: nil, symbol: symbol)
+    var title: LocalizedStringKey {
+        switch self {
+        case .playback: "Playback"
+        case .video: "Video"
+        case .audio: "Audio"
+        case .subtitles: "Subtitles"
+        case .gestures: "Gestures"
+        case .storage: "Cache & Storage"
         }
     }
 
-    private var options: [LanguagePreference] {
-        if case .custom = selection {
-            return LanguagePreference.presets + [selection]
-        }
-        return LanguagePreference.presets
-    }
-
-    private func name(of option: LanguagePreference) -> String {
-        switch option {
-        case .automatic: String(localized: "Automatic")
-        case .chinese: String(localized: "Chinese")
-        case .english: String(localized: "English")
-        case .japanese: String(localized: "Japanese")
-        case .korean: String(localized: "Korean")
-        case .custom(let codes): codes
+    var summary: LocalizedStringKey {
+        switch self {
+        case .playback: "Resuming, and what happens when a video ends."
+        case .video: "Decoding, scaling and HDR."
+        case .audio: "Preferred audio language."
+        case .subtitles: "Language, size, position and font."
+        case .gestures: "Double tap, brightness, volume and seeking."
+        case .storage: "Read-ahead buffer and thumbnails."
         }
     }
-}
 
-/// A settings row label: icon, title and an optional one-line explanation.
-private struct SettingLabel: View {
-    let title: LocalizedStringKey
-    let detail: LocalizedStringKey?
-    let symbol: String
-
-    init(_ title: LocalizedStringKey, detail: LocalizedStringKey?, symbol: String) {
-        self.title = title
-        self.detail = detail
-        self.symbol = symbol
-    }
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .foregroundStyle(.primary)
-                if let detail {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+    var symbol: String {
+        switch self {
+        case .playback: "play.circle"
+        case .video: "tv"
+        case .audio: "waveform"
+        case .subtitles: "captions.bubble"
+        case .gestures: "hand.tap"
+        case .storage: "internaldrive"
         }
-        .padding(.vertical, 2)
     }
 }

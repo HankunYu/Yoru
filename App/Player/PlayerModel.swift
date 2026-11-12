@@ -59,6 +59,9 @@ final class PlayerModel {
     // MARK: Interface state
 
     private(set) var controlsVisible = true
+    /// The controls have their own half of a half-folded display: they stay visible, since
+    /// they cover no picture.
+    private(set) var hasDedicatedControlArea = false
     private(set) var osd: OSDMessage?
     var showsDiagnostics = false
     /// Raw string values of observed diagnostic properties.
@@ -278,7 +281,14 @@ final class PlayerModel {
     }
 
     func toggleControls() {
+        guard !hasDedicatedControlArea else { return }
         controlsVisible ? hideControls() : keepControlsVisible()
+    }
+
+    func setDedicatedControlArea(_ dedicated: Bool) {
+        guard dedicated != hasDedicatedControlArea else { return }
+        hasDedicatedControlArea = dedicated
+        keepControlsVisible()
     }
 
     /// Shows the controls and restarts the auto-hide timer.
@@ -433,7 +443,7 @@ final class PlayerModel {
 
     private func scheduleControlsHide() {
         hideControlsTask?.cancel()
-        guard controlsVisible, !isPaused, !isScrubbing else { return }
+        guard controlsVisible, !isPaused, !isScrubbing, !hasDedicatedControlArea else { return }
         hideControlsTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(3.5))
             guard !Task.isCancelled else { return }

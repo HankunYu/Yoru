@@ -60,11 +60,20 @@ enum MPVFormat: Sendable {
     }
 }
 
+/// Why playback of a file ended.
+enum MPVEndReason: Sendable {
+    /// The file played to its end.
+    case endOfFile
+    case error
+    /// Stopped by a command, by quitting, or replaced by another file.
+    case stopped
+}
+
 /// The subset of libmpv events the app consumes.
 enum MPVEvent: Sendable {
     case propertyChanged(name: String, value: MPVValue)
     case fileLoaded
-    case endFile
+    case endFile(MPVEndReason)
     case playbackRestart
     case videoReconfig
     /// A `script-message` broadcast, e.g. from an input.conf binding.
@@ -83,7 +92,8 @@ enum MPVEvent: Sendable {
         case MPV_EVENT_FILE_LOADED:
             self = .fileLoaded
         case MPV_EVENT_END_FILE:
-            self = .endFile
+            let reason = event.data?.assumingMemoryBound(to: mpv_event_end_file.self).pointee.reason
+            self = .endFile(reason == MPV_END_FILE_REASON_EOF ? .endOfFile : reason == MPV_END_FILE_REASON_ERROR ? .error : .stopped)
         case MPV_EVENT_PLAYBACK_RESTART:
             self = .playbackRestart
         case MPV_EVENT_VIDEO_RECONFIG:

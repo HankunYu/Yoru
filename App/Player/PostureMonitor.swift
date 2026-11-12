@@ -4,8 +4,9 @@ import UIKit
 enum Posture: Equatable {
     /// Flat (or a device without a hinge).
     case flat
-    /// Half-folded with a horizontal fold; `fold` is the division region in the observed view's coordinates.
-    case tabletop(fold: CGRect)
+    /// Half-folded on the inner display; `fold` is the division region in the observed
+    /// view's coordinates.
+    case halfFolded(fold: CGRect)
     /// Folded shut; the app is on the outer display.
     case closed
 }
@@ -51,8 +52,8 @@ final class PostureMonitor {
         if hinge?.status == .closed {
             return .closed
         }
-        if let fold = regions.first(where: { $0.isActive })?.frame, fold.width > fold.height {
-            return .tabletop(fold: fold)
+        if let fold = regions.first(where: { $0.isActive })?.frame {
+            return .halfFolded(fold: fold)
         }
         return .flat
     }

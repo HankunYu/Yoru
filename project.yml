@@ -26,9 +26,6 @@ targets:
       - path: App
         excludes:
           - Resources/DefaultConfig
-          - Resources/Bundled
-      - path: App/Resources/Bundled
-        buildPhase: resources
       # Shipped as a folder so it can be copied verbatim into Documents/mpv on first launch.
       - path: App/Resources/DefaultConfig
         type: folder

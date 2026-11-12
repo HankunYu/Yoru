@@ -2,8 +2,8 @@ import UIKit
 
 /// Translates touches on the video into mpv `GESTURE_*` key presses.
 ///
-/// What each gesture does is decided by mpv's input bindings (Yoru's bundled touch.conf,
-/// overridable in the user's input.conf), not here. Vertical drags and pinches are
+/// What each gesture does is decided by mpv's input bindings (`TouchBindings`, overridable
+/// in the user's input.conf), not here. Vertical drags and pinches are
 /// quantized into repeated presses, the same way a mouse wheel produces ticks.
 ///
 /// The horizontal drag is the exception: seeking has to follow the finger continuously,
@@ -48,6 +48,10 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
     private let holdEnded: () -> Void
     private var scrubTravel: CGFloat = 0
     private weak var view: UIView?
+    /// The part of the view showing the picture, in its coordinates; nil for all of it.
+    /// Touches that start elsewhere (the controls' half of a half-folded display) are
+    /// ignored; that area reports its own vertical drags through `verticalDrag`.
+    var pictureRegion: CGRect?
     private var panAxis: PanAxis?
     private var panResidual: CGFloat = 0
     private var pinchReference: CGFloat = 1
@@ -72,14 +76,18 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
         tap.require(toFail: doubleTap)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         pan.maximumNumberOfTouches = 1
-        pan.delegate = self
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
         hold.minimumPressDuration = 0.35
 
         for recognizer in [doubleTap, tap, pan, pinch, hold] {
+            recognizer.delegate = self
             view.addGestureRecognizer(recognizer)
         }
+    }
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        pictureRegion?.contains(touch.location(in: recognizer.view)) ?? true
     }
 
     func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
@@ -168,6 +176,22 @@ final class TouchInput: NSObject, UIGestureRecognizerDelegate {
         default:
             break
         }
+    }
+
+    /// A vertical drag recognized outside this object's own view (the split control panel),
+    /// fed through the same brightness / volume bindings as one on the picture.
+    /// - Parameter travel: Points moved since the last call, positive upwards; nil when
+    ///   the drag begins.
+    func verticalDrag(isLeftHalf: Bool, travel: CGFloat?) {
+        guard let travel else {
+            panResidual = 0
+            return
+        }
+        emitSteps(
+            travel, step: Self.slideStep,
+            positive: isLeftHalf ? .leftUp : .rightUp,
+            negative: isLeftHalf ? .leftDown : .rightDown
+        )
     }
 
     private func emitSteps(_ delta: CGFloat, step: CGFloat, positive: Key, negative: Key) {

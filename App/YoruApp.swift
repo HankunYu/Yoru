@@ -3,6 +3,8 @@ import SwiftUI
 
 @main
 struct YoruApp: App {
+    @UIApplicationDelegateAdaptor private var appDelegate: AppDelegate
+
     init() {
         ConfigDirectory.prepare()
         do {
