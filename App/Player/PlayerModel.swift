@@ -46,6 +46,10 @@ final class PlayerModel {
     private(set) var title = ""
     private(set) var isPaused = false
     private(set) var isBuffering = false
+    /// Bytes per second mpv is currently reading from the source.
+    private(set) var cacheSpeed: Int = 0
+    /// The time up to which the file is buffered ahead of the playback position.
+    private(set) var bufferedEnd: Double = 0
     private(set) var isIdle = true
     private(set) var duration: Double = 0
     private(set) var speed: Double = 1
@@ -118,6 +122,8 @@ final class PlayerModel {
         player.observe("media-title", format: .string)
         player.observe("pause", format: .flag)
         player.observe("paused-for-cache", format: .flag)
+        player.observe("cache-speed", format: .int)
+        player.observe("demuxer-cache-time", format: .double)
         player.observe("idle-active", format: .flag)
         player.observe("time-pos", format: .double)
         player.observe("duration", format: .double)
@@ -343,6 +349,10 @@ final class PlayerModel {
             scheduleControlsHide()
         case "paused-for-cache":
             isBuffering = value.flagValue ?? false
+        case "cache-speed":
+            cacheSpeed = value.intValue ?? 0
+        case "demuxer-cache-time":
+            bufferedEnd = value.doubleValue ?? 0
         case "idle-active":
             isIdle = value.flagValue ?? true
         case "time-pos":

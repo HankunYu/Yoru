@@ -5,6 +5,8 @@ import SwiftUI
 struct SeekBar: View {
     let position: Double
     let duration: Double
+    /// The time up to which the file is buffered; shown as a lighter stretch of the track.
+    var bufferedEnd: Double = 0
     let onScrub: (Double) -> Void
     let onScrubEnded: () -> Void
 
@@ -14,12 +16,22 @@ struct SeekBar: View {
         duration > 0 ? min(max(position / duration, 0), 1) : 0
     }
 
+    private var bufferedFraction: Double {
+        duration > 0 ? min(max(bufferedEnd / duration, 0), 1) : 0
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(.white.opacity(0.22))
+                // Drawn from the start; the played part covers all but what lies ahead.
+                if bufferedFraction > fraction {
+                    Capsule()
+                        .fill(.white.opacity(0.35))
+                        .frame(width: width * bufferedFraction)
+                }
                 Capsule()
                     .fill(Theme.accent)
                     .frame(width: max(width * fraction, 0))

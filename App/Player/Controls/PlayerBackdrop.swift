@@ -16,9 +16,16 @@ struct PlayerBackdrop: View {
                 .animation(.easeInOut(duration: 0.25), value: showsScrims)
 
             if model.isBuffering {
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(.white)
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                    // How fast the source is delivering, so a stall can be told from a slow link.
+                    Text(verbatim: "\(Int64(model.cacheSpeed).formatted(.byteCount(style: .binary)))/s")
+                        .font(.footnote.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .shadow(color: Theme.controlShadow, radius: 6, y: 1)
+                }
             }
 
             VStack(spacing: 12) {

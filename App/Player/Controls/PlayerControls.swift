@@ -111,6 +111,7 @@ struct PlayerBottomBar: View {
             SeekBar(
                 position: model.position,
                 duration: model.duration,
+                bufferedEnd: model.bufferedEnd,
                 onScrub: model.scrub(to:),
                 onScrubEnded: model.endScrub
             )
