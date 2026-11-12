@@ -37,6 +37,8 @@ struct SplitControlPanel: View {
                 .font(.headline)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Adjustments", systemImage: "slider.horizontal.3") { model.showAdjustments() }
+                .buttonStyle(GlassCircleButtonStyle())
             PlaybackMenu(model: model)
         }
     }

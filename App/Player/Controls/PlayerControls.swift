@@ -151,6 +151,9 @@ private struct QuickPanel: View {
                     label: "Speed"
                 )
             }
+            Button { model.showAdjustments() } label: {
+                item(Image(systemName: "slider.horizontal.3"), label: "Adjustments")
+            }
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 6)

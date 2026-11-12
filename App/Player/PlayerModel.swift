@@ -26,6 +26,61 @@ struct MediaTrack: Identifiable, Equatable {
     }
 }
 
+/// A numeric mpv property the adjustments panel reads and writes.
+enum PlayerNumber: String, CaseIterable {
+    case subtitleDelay = "sub-delay"
+    case audioDelay = "audio-delay"
+    case subtitleScale = "sub-scale"
+    case subtitlePosition = "sub-pos"
+    case volume
+    case brightness
+    case contrast
+    case saturation
+    case gamma
+    case rotation = "video-rotate"
+    case panscan
+    case aspectOverride = "video-aspect-override"
+    /// Unset unless an A-B loop point has been placed.
+    case loopStart = "ab-loop-a"
+    case loopEnd = "ab-loop-b"
+
+    /// The value mpv starts with, shown until the first property event arrives.
+    var defaultValue: Double {
+        switch self {
+        case .subtitleScale: 1
+        case .subtitlePosition, .volume: 100
+        case .aspectOverride: -1
+        default: 0
+        }
+    }
+}
+
+/// A boolean mpv property the adjustments panel reads and writes.
+enum PlayerFlag: String, CaseIterable {
+    case subtitlesVisible = "sub-visibility"
+    case deband
+    case keepsAspect = "keepaspect"
+
+    var defaultValue: Bool {
+        switch self {
+        case .subtitlesVisible, .keepsAspect: true
+        case .deband: false
+        }
+    }
+}
+
+/// How the picture is fitted to the screen.
+enum AspectMode: CaseIterable {
+    /// The whole picture, with bars where the shapes differ.
+    case fit
+    /// Fills the screen, cropping the picture.
+    case fill
+    /// Fills the screen, distorting the picture.
+    case stretch
+    case wide
+    case standard
+}
+
 /// A transient on-screen message, shown as a small pill.
 struct OSDMessage: Equatable {
     var symbol: String
@@ -63,6 +118,12 @@ final class PlayerModel {
     // MARK: Interface state
 
     private(set) var controlsVisible = true
+    /// The adjustments panel is open, in place of the regular controls.
+    private(set) var showsAdjustments = false
+    private var numbers: [PlayerNumber: Double] = [:]
+    private var flags: [PlayerFlag: Bool] = [:]
+    /// The second subtitle track shown above the main one, if any.
+    private(set) var secondarySubtitleID: Int?
     /// The controls have their own half of a half-folded display: they stay visible, since
     /// they cover no picture.
     private(set) var hasDedicatedControlArea = false
@@ -131,6 +192,13 @@ final class PlayerModel {
         player.observe("volume", format: .double)
         player.observe("video-zoom", format: .double)
         player.observe("track-list", format: .node)
+        for number in PlayerNumber.allCases where number != .volume {
+            player.observe(number.rawValue, format: .double)
+        }
+        for flag in PlayerFlag.allCases {
+            player.observe(flag.rawValue, format: .flag)
+        }
+        player.observe("secondary-sid", format: .string)
         for name in Self.diagnosticProperties {
             player.observe(name, format: .string)
         }
@@ -255,6 +323,70 @@ final class PlayerModel {
         onClose?()
     }
 
+    // MARK: - Adjustments
+
+    func number(_ number: PlayerNumber) -> Double {
+        numbers[number] ?? number.defaultValue
+    }
+
+    /// Whether mpv reports a value at all; false for an A-B loop point that is not placed.
+    func isSet(_ number: PlayerNumber) -> Bool {
+        numbers[number] != nil
+    }
+
+    func set(_ number: PlayerNumber, to value: Double) {
+        // Shown at once rather than when mpv echoes it, so a dragged slider does not lag.
+        numbers[number] = value
+        player?.setProperty(number.rawValue, String(value))
+    }
+
+    func clear(_ number: PlayerNumber) {
+        numbers[number] = nil
+        player?.setProperty(number.rawValue, "no")
+    }
+
+    func flag(_ flag: PlayerFlag) -> Bool {
+        flags[flag] ?? flag.defaultValue
+    }
+
+    func set(_ flag: PlayerFlag, to value: Bool) {
+        flags[flag] = value
+        player?.setProperty(flag.rawValue, value ? "yes" : "no")
+    }
+
+    func selectSecondarySubtitle(_ track: MediaTrack?) {
+        secondarySubtitleID = track?.id
+        player?.setProperty("secondary-sid", track.map { String($0.id) } ?? "no")
+    }
+
+    var aspectMode: AspectMode {
+        if !flag(.keepsAspect) { return .stretch }
+        let override = number(.aspectOverride)
+        if abs(override - 16.0 / 9) < 0.01 { return .wide }
+        if abs(override - 4.0 / 3) < 0.01 { return .standard }
+        return number(.panscan) >= 1 ? .fill : .fit
+    }
+
+    func setAspectMode(_ mode: AspectMode) {
+        set(.keepsAspect, to: mode != .stretch)
+        set(.panscan, to: mode == .fill ? 1 : 0)
+        switch mode {
+        case .wide: set(.aspectOverride, to: 16.0 / 9)
+        case .standard: set(.aspectOverride, to: 4.0 / 3)
+        default: set(.aspectOverride, to: -1)
+        }
+    }
+
+    func showAdjustments() {
+        showsAdjustments = true
+    }
+
+    func hideAdjustments() {
+        guard showsAdjustments else { return }
+        showsAdjustments = false
+        keepControlsVisible()
+    }
+
     private func beginHoldSpeed(_ holdSpeed: Double) {
         guard speedBeforeHold == nil else { return }
         speedBeforeHold = speed
@@ -287,6 +419,11 @@ final class PlayerModel {
     }
 
     func toggleControls() {
+        // A tap on the picture dismisses the adjustments panel first.
+        if showsAdjustments {
+            hideAdjustments()
+            return
+        }
         guard !hasDedicatedControlArea else { return }
         controlsVisible ? hideControls() : keepControlsVisible()
     }
@@ -376,6 +513,9 @@ final class PlayerModel {
             }
         case "volume":
             let volume = value.doubleValue ?? 100
+            numbers[.volume] = volume
+            // The panel's own slider already shows the value.
+            guard !showsAdjustments else { return }
             announce(name) {
                 OSDMessage(
                     symbol: volume <= 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
@@ -390,8 +530,16 @@ final class PlayerModel {
             }
         case "track-list":
             tracks = (value.arrayValue ?? []).compactMap(MediaTrack.init)
+        case "secondary-sid":
+            secondarySubtitleID = value.stringValue.flatMap(Int.init)
         default:
-            diagnostics[name] = value.stringValue ?? "-"
+            if let number = PlayerNumber(rawValue: name) {
+                numbers[number] = value.doubleValue
+            } else if let flag = PlayerFlag(rawValue: name) {
+                flags[flag] = value.flagValue
+            } else {
+                diagnostics[name] = value.stringValue ?? "-"
+            }
         }
     }
 

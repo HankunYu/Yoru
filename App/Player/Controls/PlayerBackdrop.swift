@@ -53,7 +53,7 @@ struct PlayerBackdrop: View {
     }
 
     private var showsScrims: Bool {
-        model.controlsVisible && !model.hasDedicatedControlArea
+        model.controlsVisible && !model.hasDedicatedControlArea && !model.showsAdjustments
     }
 
     private var scrims: some View {

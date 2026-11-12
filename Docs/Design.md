@@ -234,3 +234,23 @@ delegate because SwiftUI owns the presenting controllers).
 - **Not pinned to a physical half**: the picture is always the upper half on screen.
 - **Open**: using the outer display propped up like a tent; which display the system lights
   in that posture, and what the player should do, are undecided.
+
+## Adjustments panel
+
+A second-level panel (`AdjustmentPanel`) for what is tuned while watching, opened from the
+quick panel; the track and speed menus stay one tap away beside it. Four tabs: subtitles
+(delay, size, position, visibility, second subtitle), audio (delay, volume boost up to
+`volume-max=200`), picture (aspect, rotation, equalizer, debanding) and playback (fine
+speed, A-B loop).
+
+- **Placement**: a trailing drawer on a wide view, a bottom sheet on a tall one, and the
+  controls' half when half-folded. It replaces whichever controls would show, and a tap on
+  the picture dismisses it. Playback continues, so changes are judged against the picture.
+- **State**: `PlayerNumber` and `PlayerFlag` name the mpv properties behind the controls;
+  `PlayerModel` mirrors them and writes back optimistically.
+- **Persistence**: `watch-later-options` keeps the position, tracks, subtitle visibility
+  and the two delays per file (`start` must be listed in this mpv version). Everything else
+  lasts for the playback; subtitle size and position can be written to `mpv.conf` as the
+  default from the panel.
+- **Resume safety**: mpv deletes a resume file when the file is opened and rewrites it on
+  quit, so the app also saves every 20 seconds and whenever it stops being active.

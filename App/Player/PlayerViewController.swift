@@ -19,6 +19,8 @@ final class PlayerViewController: UIViewController {
     private var controlHosts: [UIView] = []
     // Shown instead of `controlHosts` while the controls have their own half of the display.
     private var splitPanel: UIView?
+    // The adjustments panel; laid out by frame, since where it goes depends on the posture.
+    private var adjustmentPanel: UIView?
     // The full-width control rows and their trailing/leading edge constraints, adjusted by
     // `updateControlInsets()` to step around occlusions.
     private var controlRows: [(host: UIView, leading: NSLayoutConstraint, trailing: NSLayoutConstraint)] = []
@@ -130,6 +132,8 @@ final class PlayerViewController: UIViewController {
             ("gpu-context", "moltenvk"),
             ("hwdec", "videotoolbox"),
             ("keep-open", "yes"),
+            // Headroom for the adjustments panel's volume boost.
+            ("volume-max", "200"),
             ("save-position-on-quit", "yes"),
             ("input-default-bindings", "yes"),
             ("watch-later-dir", ConfigDirectory.url.appending(path: "watch_later").path),
@@ -352,6 +356,9 @@ final class PlayerViewController: UIViewController {
             fillsItsFrame: true
         )
         self.splitPanel = splitPanel
+        let adjustmentPanel = host(AdjustmentPanel(model: model), fillsItsFrame: true)
+        adjustmentPanel.translatesAutoresizingMaskIntoConstraints = true
+        self.adjustmentPanel = adjustmentPanel
 
         view.addLayoutGuide(controlsGuide)
         let guide = controlsGuide
@@ -407,6 +414,7 @@ final class PlayerViewController: UIViewController {
         super.viewDidLayoutSubviews()
         updateSplit()
         updateControlInsets()
+        layoutAdjustmentPanel()
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -434,6 +442,27 @@ final class PlayerViewController: UIViewController {
     }
 
     /// - Parameter fillsItsFrame: The view is sized by its constraints rather than by its content.
+    /// Half-folded, the panel takes the controls' half. Otherwise it is a drawer along the
+    /// trailing edge on a wide view and a sheet along the bottom on a tall one, leaving as
+    /// much of the picture visible as it can.
+    private func layoutAdjustmentPanel() {
+        guard let adjustmentPanel else { return }
+        let area = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 10, dy: 10)
+        let frame: CGRect
+        if model.hasDedicatedControlArea {
+            frame = controlsGuide.layoutFrame.insetBy(dx: 10, dy: 10)
+        } else if area.width > area.height {
+            let width = min(360, area.width * 0.5)
+            frame = CGRect(x: area.maxX - width, y: area.minY, width: width, height: area.height)
+        } else {
+            let height = min(440, area.height * 0.5)
+            frame = CGRect(x: area.minX, y: area.maxY - height, width: area.width, height: height)
+        }
+        if adjustmentPanel.frame != frame {
+            adjustmentPanel.frame = frame
+        }
+    }
+
     private func host(_ content: some View, fillsItsFrame: Bool = false) -> UIView {
         let controller = UIHostingController(rootView: content)
         controller.sizingOptions = fillsItsFrame ? [] : .intrinsicContentSize
@@ -451,22 +480,27 @@ final class PlayerViewController: UIViewController {
     /// area. Hidden controls must not swallow touches, hence UIKit-level alpha and
     /// interaction rather than SwiftUI opacity.
     private func trackControlsVisibility() {
-        let (visible, dedicated) = withObservationTracking {
-            (model.controlsVisible, model.hasDedicatedControlArea)
+        let (visible, dedicated, adjusting) = withObservationTracking {
+            (model.controlsVisible, model.hasDedicatedControlArea, model.showsAdjustments)
         } onChange: { [weak self] in
             Task { @MainActor in self?.trackControlsVisibility() }
         }
-        let showsFloating = visible && !dedicated
+        // The adjustments panel stands in for whichever controls would otherwise show.
+        let showsFloating = visible && !dedicated && !adjusting
+        let showsSplit = dedicated && !adjusting
+        view.setNeedsLayout()
         UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
             for host in self.controlHosts {
                 host.alpha = showsFloating ? 1 : 0
             }
-            self.splitPanel?.alpha = dedicated ? 1 : 0
+            self.splitPanel?.alpha = showsSplit ? 1 : 0
+            self.adjustmentPanel?.alpha = adjusting ? 1 : 0
         }
         for host in controlHosts {
             host.isUserInteractionEnabled = showsFloating
         }
-        splitPanel?.isUserInteractionEnabled = dedicated
+        splitPanel?.isUserInteractionEnabled = showsSplit
+        adjustmentPanel?.isUserInteractionEnabled = adjusting
     }
 
     // MARK: - Diagnostics
