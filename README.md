@@ -31,6 +31,14 @@ xcodebuild -project Yoru.xcodeproj -scheme Yoru -configuration Debug \
 
 Set your own `DEVELOPMENT_TEAM` and bundle identifier in `project.yml` first.
 
+The unit tests cover the logic that does not need a device (config file editing, subtitle
+choice, resume files, WebDAV parsing, download planning). They run in a simulator:
+
+```sh
+xcodebuild test -project Yoru.xcodeproj -scheme Yoru \
+  -destination 'platform=iOS Simulator,name=iPad Pro 11-inch (M5)'
+```
+
 libmpv comes from [a fork of MPVKit](https://github.com/HankunYu/MPVKit/tree/yoru) that
 enables LuaJIT on iOS and carries two small libmpv patches (a surface-size option for
 host-driven resizing, and the `GESTURE_*` key names). The GPL build is used.

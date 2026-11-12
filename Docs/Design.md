@@ -351,3 +351,21 @@ speed, A-B loop).
   side, the quick panel moves to a row above the seek bar (`ViewThatFits`).
 - **Split panel gestures**: the controls' half of a half-folded display takes the picture's
   gestures on its empty space, all but the single tap, through the same bindings.
+
+## Tests, file info and the fork's FFmpeg
+
+- **Unit tests**: the `YoruTests` target covers logic that needs no device: config file
+  editing, subtitle choice, resume file re-keying, download planning, media kinds, sorting,
+  server addresses, bookmarks, WebDAV parsing, touch bindings, HDR tone mapping and typed
+  times. They run in a simulator in under a second. What involves a live mpv or the
+  transfer queue's background work is not covered.
+- **File info**: `InfoPanel` shows container, codecs and formats in a readable form, from
+  properties observed as strings. mpv's statistics overlay stays for diagnosing playback;
+  its menu item mirrors the on/off state itself, since mpv's script does not report it.
+- **Diagnostics** (layer, display, fold state) is a troubleshooting aid, offered in the
+  menu only when `diagnostics=yes` in `yoru.conf`.
+- **Jump to time**: seconds, `m:ss` or `h:mm:ss`, seeking exactly.
+- **FFmpeg from the fork**: the fork now builds FFmpeg too (release `yoru-0.41.0-2`),
+  adding the PNG, APNG, WebP, GIF, BMP and TIFF decoders, GIF and APNG demuxers, and the
+  dynaudnorm, loudnorm, acompressor, cropdetect and crop filters. Images follow that list;
+  HEIC, JPEG XL and AVIF are not decoded. No volume normalization switch exists yet.

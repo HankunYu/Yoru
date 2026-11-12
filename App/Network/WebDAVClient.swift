@@ -137,7 +137,7 @@ struct WebDAVClient: Sendable {
 }
 
 /// Parses a PROPFIND multistatus response.
-private final class WebDAVListing: NSObject, XMLParserDelegate {
+final class WebDAVListing: NSObject, XMLParserDelegate {
     struct Item {
         /// The decoded path of the resource on the server.
         let path: String

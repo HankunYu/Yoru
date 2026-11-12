@@ -239,7 +239,25 @@ targets:
               public.filename-extension: [dff]
               public.mime-type: [audio/x-dff]
     scheme:
+      testTargets:
+        - YoruTests
       environmentVariables:
         # MoltenVK HDR paths trip Metal API validation (KhronosGroup/MoltenVK#2226).
         MTL_DEBUG_LAYER: "0"
       enableMetalAPIValidation: false
+
+  # Unit tests for the app's pure logic. They run inside the app on a simulator:
+  #   xcodebuild test -project Yoru.xcodeproj -scheme Yoru -destination 'platform=iOS Simulator,name=iPad Pro 11-inch (M5)'
+  YoruTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Yoru
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.hankunyu.YoruTests
+        # The app module imports CSMBClient, so its module map must be visible here too.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/Vendor/CSMBClient
