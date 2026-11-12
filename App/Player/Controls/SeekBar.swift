@@ -7,6 +7,8 @@ struct SeekBar: View {
     let duration: Double
     /// The time up to which the file is buffered; shown as a lighter stretch of the track.
     var bufferedEnd: Double = 0
+    /// Times marked on the track: where chapters begin.
+    var marks: [Double] = []
     let onScrub: (Double) -> Void
     let onScrubEnded: () -> Void
 
@@ -32,6 +34,14 @@ struct SeekBar: View {
                         .fill(.white.opacity(0.35))
                         .frame(width: width * bufferedFraction)
                 }
+                // Chapter starts as gaps in the track; the very beginning needs none.
+                ForEach(marks.filter { $0 > 0 && $0 < duration }, id: \.self) { mark in
+                    Rectangle()
+                        .fill(.black.opacity(0.55))
+                        .frame(width: 2)
+                        .offset(x: width * mark / duration - 1)
+                }
+                .zIndex(1)
                 Capsule()
                     .fill(Theme.accent)
                     .frame(width: max(width * fraction, 0))

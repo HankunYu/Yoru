@@ -124,6 +124,7 @@ struct PlayerBottomBar: View {
                 position: model.position,
                 duration: model.duration,
                 bufferedEnd: model.bufferedEnd,
+                marks: model.chapters.map(\.time),
                 onScrub: model.scrub(to:),
                 onScrubEnded: model.endScrub
             )
@@ -162,6 +163,9 @@ private struct QuickPanel: View {
                         .font(.footnote.weight(.semibold).monospacedDigit()),
                     label: "Speed"
                 )
+            }
+            Button { model.showContents() } label: {
+                item(Image(systemName: "list.bullet"), label: "Playlist and Chapters")
             }
             Button { model.showAdjustments() } label: {
                 item(Image(systemName: "slider.horizontal.3"), label: "Adjustments")

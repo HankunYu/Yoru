@@ -131,6 +131,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
     // MARK: - Player lifecycle
 
     private func startPlayer() {
+        // The player view must have its size before mpv is told to load anything: mpv's
+        // Vulkan context refuses to configure a surface of unknown size, and a file that
+        // decodes its first frame before the size arrives then fails to show any video.
+        view.layoutIfNeeded()
         edrHeadroom = view.window?.windowScene?.screen.potentialEDRHeadroom ?? 1
         var options: [(name: String, value: String)] = [
             ("vo", "gpu-next"),
@@ -138,6 +142,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             ("gpu-context", "moltenvk"),
             ("hwdec", "videotoolbox"),
             ("keep-open", "yes"),
+            // Without this mpv's audio output asks to mix with other apps, and an app
+            // that mixes never becomes the system's "now playing" app: nothing shows on
+            // the lock screen or in Control Center, and remote controls do nothing.
+            ("audio-exclusive", "yes"),
             // Headroom for the adjustments panel's volume boost.
             ("volume-max", "200"),
             ("save-position-on-quit", "yes"),
@@ -178,6 +186,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             loadTouchBindings(into: player)
             model.attach(player)
             model.onStep = { [weak self] offset in self?.step(offset) }
+            model.onSelectPlaylistEntry = { [weak self] index in self?.play(at: index) }
             model.onReachedEnd = { [weak self] in self?.playbackReachedEnd() }
             // Cached so the background handler can restore it without a synchronous read.
             player.observe("vid", format: .string)
@@ -202,6 +211,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         let index = target.queue?.index(of: target)
         model.hasPrevious = index.map { $0 > 0 } ?? false
         model.hasNext = index.map { $0 + 1 < (target.queue?.items.count ?? 0) } ?? false
+        let items = target.queue?.items ?? []
+        model.playlist = items.count > 1 ? items.enumerated().map { PlaylistEntry(id: $0, title: $1.title) } : []
+        model.playlistIndex = index
+        // Whatever thumbnail the browser already has serves as the lock screen artwork.
+        let item = index.map { items[$0] }
+        model.artwork = item.flatMap { MediaPreviewStore.shared.cachedPreview(for: $0)?.image }
         model.initialSubtitleChoice = target.initialSubtitleChoice
         model.beginLoading()
 
@@ -222,10 +237,25 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
 
     /// Moves to the previous (-1) or next (1) file of the folder.
     private func step(_ offset: Int) {
-        guard let queue = target.queue, let index = queue.index(of: target),
-              queue.items.indices.contains(index + offset) else { return }
+        guard let index = target.queue?.index(of: target) else { return }
+        play(at: index + offset)
+    }
+
+    /// Switches to the file at `index` of the folder.
+    private func play(at index: Int) {
+        guard let queue = target.queue, queue.items.indices.contains(index) else { return }
+        // mpv saves the outgoing file's position itself when another file is loaded over
+        // it. For a file left at its end that would bring back the very entry that was
+        // just removed, so saving is switched off across the load.
+        let isFinished = model.isNearEnd
         forgetOrSaveResumePosition()
-        load(queue.target(at: index + offset))
+        if isFinished {
+            player?.setProperty("save-position-on-quit", "no")
+        }
+        load(queue.target(at: index))
+        if isFinished, resumesPlayback {
+            player?.setProperty("save-position-on-quit", "yes")
+        }
         // The file being left may have been paused, by the user or at its end.
         player?.setProperty("pause", "no")
     }
@@ -423,7 +453,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             fillsItsFrame: true
         )
         self.splitPanel = splitPanel
-        let adjustmentPanel = host(AdjustmentPanel(model: model), fillsItsFrame: true)
+        let adjustmentPanel = host(SidePanel(model: model), fillsItsFrame: true)
         adjustmentPanel.translatesAutoresizingMaskIntoConstraints = true
         adjustmentPanel.alpha = 0
         let dismissPan = UIPanGestureRecognizer(target: self, action: #selector(handleAdjustmentPanelPan))

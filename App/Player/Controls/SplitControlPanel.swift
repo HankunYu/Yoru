@@ -37,6 +37,8 @@ struct SplitControlPanel: View {
                 .font(.headline)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Playlist and Chapters", systemImage: "list.bullet") { model.showContents() }
+                .buttonStyle(GlassCircleButtonStyle())
             Button("Adjustments", systemImage: "slider.horizontal.3") { model.showAdjustments() }
                 .buttonStyle(GlassCircleButtonStyle())
             PlaybackMenu(model: model)
@@ -49,6 +51,7 @@ struct SplitControlPanel: View {
                 position: model.position,
                 duration: model.duration,
                 bufferedEnd: model.bufferedEnd,
+                marks: model.chapters.map(\.time),
                 onScrub: model.scrub(to:),
                 onScrubEnded: model.endScrub
             )

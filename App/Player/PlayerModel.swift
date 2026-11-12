@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// One audio, video or subtitle track of the current file.
 struct MediaTrack: Identifiable, Equatable {
@@ -45,12 +46,15 @@ enum PlayerNumber: String, CaseIterable {
     /// Unset unless an A-B loop point has been placed.
     case loopStart = "ab-loop-a"
     case loopEnd = "ab-loop-b"
+    case subtitleOutline = "sub-outline-size"
+    case subtitleShadow = "sub-shadow-offset"
 
     /// The value mpv starts with, shown until the first property event arrives.
     var defaultValue: Double {
         switch self {
         case .subtitleScale: 1
         case .subtitlePosition, .volume: 100
+        case .subtitleOutline: 3
         case .aspectOverride: -1
         default: 0
         }
@@ -62,13 +66,54 @@ enum PlayerFlag: String, CaseIterable {
     case subtitlesVisible = "sub-visibility"
     case deband
     case keepsAspect = "keepaspect"
+    case subtitleBold = "sub-bold"
 
     var defaultValue: Bool {
         switch self {
         case .subtitlesVisible, .keepsAspect: true
-        case .deband: false
+        case .deband, .subtitleBold: false
         }
     }
+}
+
+/// A textual mpv property the adjustments panel reads and writes.
+enum PlayerText: String, CaseIterable {
+    /// `#AARRGGBB`.
+    case subtitleColor = "sub-color"
+    /// `outline-and-shadow` or `background-box`.
+    case subtitleBorderStyle = "sub-border-style"
+    /// How far these settings apply to subtitles that carry their own styling (ASS):
+    /// `scale` leaves their look alone, `force` replaces it.
+    case subtitleStyleOverride = "sub-ass-override"
+
+    var defaultValue: String {
+        switch self {
+        case .subtitleColor: "#FFFFFFFF"
+        case .subtitleBorderStyle: "outline-and-shadow"
+        case .subtitleStyleOverride: "scale"
+        }
+    }
+}
+
+/// A chapter of the current file.
+struct Chapter: Identifiable, Equatable {
+    /// Its index, which is also what mpv's `chapter` property counts in.
+    let id: Int
+    let title: String
+    let time: Double
+}
+
+/// One file of the folder being played through.
+struct PlaylistEntry: Identifiable, Equatable {
+    let id: Int
+    let title: String
+}
+
+/// What the second-level panel shows.
+enum SidePanelContent {
+    case adjustments
+    /// The playlist and the chapters: where to go, rather than how it looks.
+    case contents
 }
 
 /// How the picture is fitted to the screen.
@@ -142,6 +187,18 @@ final class PlayerModel {
     private(set) var controlsVisible = true
     /// The adjustments panel is open, in place of the regular controls.
     private(set) var showsAdjustments = false
+    /// What the panel holds; kept while it slides away.
+    private(set) var sidePanelContent = SidePanelContent.adjustments
+    private var texts: [PlayerText: String] = [:]
+    private(set) var chapters: [Chapter] = []
+    /// The chapter being played; nil before the first one or without chapters.
+    private(set) var currentChapter: Int?
+    /// The folder's files and which one is playing; empty for a file opened on its own.
+    var playlist: [PlaylistEntry] = []
+    var playlistIndex: Int?
+    /// A picture of the current file for the lock screen, if one is at hand.
+    var artwork: UIImage?
+    var onSelectPlaylistEntry: ((Int) -> Void)?
     /// The adjustments panel rises from the bottom rather than sliding in from the side;
     /// it then shows a grabber to drag it away by. Set by whoever lays the panel out.
     var adjustmentsRiseFromBottom = false
@@ -183,6 +240,7 @@ final class PlayerModel {
         "frame-drop-count",
         "decoder-frame-drop-count",
         "video-bitrate",
+        "chapters",
     ]
 
     private var player: MPVPlayer?
@@ -231,7 +289,12 @@ final class PlayerModel {
         for flag in PlayerFlag.allCases {
             player.observe(flag.rawValue, format: .flag)
         }
+        for text in PlayerText.allCases {
+            player.observe(text.rawValue, format: .string)
+        }
         player.observe("secondary-sid", format: .string)
+        player.observe("chapter-list", format: .node)
+        player.observe("chapter", format: .int)
         for name in Self.diagnosticProperties {
             player.observe(name, format: .string)
         }
@@ -487,7 +550,31 @@ final class PlayerModel {
         }
     }
 
+    func text(_ text: PlayerText) -> String {
+        texts[text] ?? text.defaultValue
+    }
+
+    func set(_ text: PlayerText, to value: String) {
+        texts[text] = value
+        player?.setProperty(text.rawValue, value)
+    }
+
+    func seek(to chapter: Chapter) {
+        player?.setProperty("chapter", String(chapter.id))
+    }
+
+    func selectPlaylistEntry(_ entry: PlaylistEntry) {
+        guard entry.id != playlistIndex else { return }
+        onSelectPlaylistEntry?(entry.id)
+    }
+
     func showAdjustments() {
+        sidePanelContent = .adjustments
+        showsAdjustments = true
+    }
+
+    func showContents() {
+        sidePanelContent = .contents
         showsAdjustments = true
     }
 
@@ -651,11 +738,25 @@ final class PlayerModel {
             chooseInitialSubtitle()
         case "secondary-sid":
             secondarySubtitleID = value.stringValue.flatMap(Int.init)
+        case "chapter-list":
+            chapters = (value.arrayValue ?? []).enumerated().compactMap { index, chapter in
+                guard let time = chapter["time"]?.doubleValue else { return nil }
+                let title = chapter["title"]?.stringValue ?? ""
+                return Chapter(
+                    id: index,
+                    title: title.isEmpty ? String(localized: "Chapter \(index + 1)") : title,
+                    time: time
+                )
+            }
+        case "chapter":
+            currentChapter = value.intValue.flatMap { $0 >= 0 ? $0 : nil }
         default:
             if let number = PlayerNumber(rawValue: name) {
                 numbers[number] = value.doubleValue
             } else if let flag = PlayerFlag(rawValue: name) {
                 flags[flag] = value.flagValue
+            } else if let text = PlayerText(rawValue: name) {
+                texts[text] = value.stringValue
             } else {
                 diagnostics[name] = value.stringValue ?? "-"
             }

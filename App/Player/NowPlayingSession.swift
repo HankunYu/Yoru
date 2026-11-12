@@ -34,6 +34,9 @@ final class NowPlayingSession {
         add(center.skipForwardCommand) { model, _ in model.skip(10) }
         center.skipBackwardCommand.preferredIntervals = [10]
         add(center.skipBackwardCommand) { model, _ in model.skip(-10) }
+        // The lock screen shows the skip buttons; these serve headphones, keyboards and cars.
+        add(center.nextTrackCommand) { model, _ in model.step(1) }
+        add(center.previousTrackCommand) { model, _ in model.step(-1) }
         add(center.changePlaybackPositionCommand) { model, event in
             guard let event = event as? MPChangePlaybackPositionCommandEvent else { return }
             model.scrub(to: event.positionTime)
@@ -82,12 +85,26 @@ final class NowPlayingSession {
         }
     }
 
+    // The system asks for the image on a queue of its own, so the closure must not be
+    // tied to the main actor; built here, outside the class's isolation, it is not.
+    private nonisolated static func artwork(_ image: UIImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+    }
+
     private func publish() {
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+        var info: [String: Any] = [
             MPMediaItemPropertyTitle: model.title,
             MPMediaItemPropertyPlaybackDuration: model.duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: model.nowPlayingReferencePosition,
             MPNowPlayingInfoPropertyPlaybackRate: model.isPaused ? 0 : model.speed,
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.video.rawValue,
         ]
+        if let image = model.artwork {
+            info[MPMediaItemPropertyArtwork] = Self.artwork(image)
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        let center = MPRemoteCommandCenter.shared()
+        center.nextTrackCommand.isEnabled = model.hasNext
+        center.previousTrackCommand.isEnabled = model.hasPrevious
     }
 }

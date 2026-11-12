@@ -1,8 +1,78 @@
 import SwiftUI
 
-/// The second-level panel for everything adjusted while watching, beyond picking a track:
-/// timing, subtitle appearance, picture and playback. Changes apply at once and playback
-/// continues, so their effect can be judged against the picture.
+/// The second-level panel that slides in beside or below the picture. It holds one of two
+/// things: the adjustments (how the file looks and sounds) or the contents (where to go in
+/// it: playlist and chapters). Playback continues while it is open.
+struct SidePanel: View {
+    let model: PlayerModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if model.adjustmentsRiseFromBottom {
+                Capsule()
+                    .fill(.white.opacity(0.35))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 8)
+                    .accessibilityHidden(true)
+            }
+            switch model.sidePanelContent {
+            case .adjustments: AdjustmentPanel(model: model)
+            case .contents: ContentsPanel(model: model)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(.white)
+        // The scrolling content is cut off along the panel's outline, not its bounding box.
+        .clipShape(Self.outline)
+        .glassEffect(.regular, in: Self.outline)
+    }
+
+    /// Concentric with the display's own corners, whatever the panel's distance from them.
+    private static var outline: ConcentricRectangle {
+        ConcentricRectangle(corners: .concentric(minimum: 22), isUniform: true)
+    }
+}
+
+/// The panel's top row: a segmented choice of pages and the close button.
+struct SidePanelHeader<Page: Hashable>: View {
+    let model: PlayerModel
+    let pages: [(Page, LocalizedStringKey)]
+    @Binding var selection: Page
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Picker("Page", selection: $selection) {
+                ForEach(pages, id: \.0) { page, title in
+                    Text(title).tag(page)
+                }
+            }
+            .pickerStyle(.segmented)
+            Button("Close", systemImage: "xmark") { model.hideAdjustments() }
+                .buttonStyle(GlassCircleButtonStyle())
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, model.adjustmentsRiseFromBottom ? 8 : 14)
+        .padding(.bottom, 14)
+    }
+}
+
+extension View {
+    /// Fades scrolling content out toward the panel's bottom edge instead of slicing
+    /// through a row.
+    func sidePanelScrollFade() -> some View {
+        scrollIndicators(.hidden)
+            .mask {
+                LinearGradient(
+                    stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9),
+                            .init(color: .clear, location: 1)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            }
+    }
+}
+
+/// Everything adjusted while watching, beyond picking a track: timing, subtitle appearance,
+/// picture and playback. Changes apply at once, so they can be judged against the picture.
 struct AdjustmentPanel: View {
     let model: PlayerModel
     @State private var tab = Tab.subtitles
@@ -24,60 +94,20 @@ struct AdjustmentPanel: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if model.adjustmentsRiseFromBottom {
-                Capsule()
-                    .fill(.white.opacity(0.35))
-                    .frame(width: 36, height: 5)
-                    .padding(.top, 8)
-                    .accessibilityHidden(true)
-            }
-            HStack(spacing: 10) {
-                Picker("Adjustments", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { tab in
-                        Text(tab.title).tag(tab)
-                    }
+        SidePanelHeader(model: model, pages: Tab.allCases.map { ($0, $0.title) }, selection: $tab)
+        ScrollView {
+            VStack(spacing: 22) {
+                switch tab {
+                case .subtitles: SubtitleAdjustments(model: model)
+                case .audio: AudioAdjustments(model: model)
+                case .picture: PictureAdjustments(model: model)
+                case .playback: PlaybackAdjustments(model: model)
                 }
-                .pickerStyle(.segmented)
-                Button("Close", systemImage: "xmark") { model.hideAdjustments() }
-                    .buttonStyle(GlassCircleButtonStyle())
             }
-            .padding(.horizontal, 14)
-            .padding(.top, model.adjustmentsRiseFromBottom ? 8 : 14)
-            .padding(.bottom, 14)
-
-            ScrollView {
-                VStack(spacing: 22) {
-                    switch tab {
-                    case .subtitles: SubtitleAdjustments(model: model)
-                    case .audio: AudioAdjustments(model: model)
-                    case .picture: PictureAdjustments(model: model)
-                    case .playback: PlaybackAdjustments(model: model)
-                    }
-                }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 20)
-            }
-            .scrollIndicators(.hidden)
-            // Fades the content out toward the bottom edge instead of slicing through a row.
-            .mask {
-                LinearGradient(
-                    stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9),
-                            .init(color: .clear, location: 1)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 20)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .foregroundStyle(.white)
-        // The scrolling content is cut off along the panel's outline, not its bounding box.
-        .clipShape(Self.outline)
-        .glassEffect(.regular, in: Self.outline)
-    }
-
-    /// Concentric with the display's own corners, whatever the panel's distance from them.
-    private static var outline: ConcentricRectangle {
-        ConcentricRectangle(corners: .concentric(minimum: 22), isUniform: true)
+        .sidePanelScrollFade()
     }
 }
 
@@ -102,7 +132,56 @@ private struct SubtitleAdjustments: View {
             range: 60...100,
             step: 1
         )
-        Button("Use Size and Position as Default") { saveAsDefault() }
+        Row(title: "Color") {
+            HStack(spacing: 10) {
+                ForEach(Self.colors, id: \.self) { color in
+                    Button {
+                        model.set(.subtitleColor, to: color)
+                    } label: {
+                        Circle()
+                            .fill(Color(subtitleColor: color))
+                            .frame(width: 26, height: 26)
+                            .overlay {
+                                Circle().strokeBorder(.white, lineWidth: isSelected(color) ? 2.5 : 0)
+                                    .padding(-4)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        SliderRow(
+            title: "Outline",
+            valueText: String(format: "%.1f", model.number(.subtitleOutline)),
+            value: model.binding(.subtitleOutline),
+            range: 0...6,
+            step: 0.5
+        )
+        SliderRow(
+            title: "Shadow",
+            valueText: String(format: "%.1f", model.number(.subtitleShadow)),
+            value: model.binding(.subtitleShadow),
+            range: 0...4,
+            step: 0.5
+        )
+        Toggle("Bold", isOn: model.binding(.subtitleBold))
+            .tint(Theme.accent)
+        Toggle("Background Box", isOn: Binding(
+            get: { model.text(.subtitleBorderStyle) == "background-box" },
+            set: { model.set(.subtitleBorderStyle, to: $0 ? "background-box" : "outline-and-shadow") }
+        ))
+        .tint(Theme.accent)
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Override Styled Subtitles", isOn: Binding(
+                get: { model.text(.subtitleStyleOverride) == "force" },
+                set: { model.set(.subtitleStyleOverride, to: $0 ? "force" : "scale") }
+            ))
+            .tint(Theme.accent)
+            Text("Subtitles with their own styling (ASS) keep it unless this is on.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        Button("Use This Look as Default") { saveAsDefault() }
             .buttonStyle(PanelButtonStyle())
         Toggle("Show Subtitles", isOn: model.binding(.subtitlesVisible))
             .tint(Theme.accent)
@@ -131,13 +210,47 @@ private struct SubtitleAdjustments: View {
         model.subtitleTracks.first { $0.id == model.secondarySubtitleID }?.displayName ?? String(localized: "Off")
     }
 
-    /// Writes the two values into mpv.conf, where Settings reads them too.
+    /// `#AARRGGBB`, as mpv spells colors.
+    private static let colors = ["#FFFFFFFF", "#FFFFE066", "#FF7FE0FF", "#FF9CF29C", "#FFFFA8C8"]
+
+    private func isSelected(_ color: String) -> Bool {
+        model.text(.subtitleColor).caseInsensitiveCompare(color) == .orderedSame
+    }
+
+    /// Writes the current look into mpv.conf, where Settings reads size and position too.
     private func saveAsDefault() {
         let previous = PlayerOptions.load()
         var options = previous
         options.subtitleScale = model.number(.subtitleScale)
         options.subtitlePosition = Int(model.number(.subtitlePosition).rounded())
         options.save(changedFrom: previous)
+
+        var file = KeyValueFile(url: PlayerOptions.fileURL)
+        file.set(PlayerText.subtitleColor.rawValue, to: "\"\(model.text(.subtitleColor))\"")
+        file.set(PlayerNumber.subtitleOutline.rawValue, to: String(format: "%g", model.number(.subtitleOutline)))
+        file.set(PlayerNumber.subtitleShadow.rawValue, to: String(format: "%g", model.number(.subtitleShadow)))
+        file.set(PlayerFlag.subtitleBold.rawValue, to: model.flag(.subtitleBold) ? "yes" : "no")
+        file.set(PlayerText.subtitleBorderStyle.rawValue, to: model.text(.subtitleBorderStyle))
+        file.set(PlayerText.subtitleStyleOverride.rawValue, to: model.text(.subtitleStyleOverride))
+        file.save()
+    }
+}
+
+private extension Color {
+    /// A color from mpv's `#AARRGGBB` spelling; white if it does not parse.
+    init(subtitleColor text: String) {
+        let digits = text.dropFirst()
+        guard digits.count == 8, let value = UInt32(digits, radix: 16) else {
+            self = .white
+            return
+        }
+        self.init(
+            .sRGB,
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255,
+            opacity: Double(value >> 24) / 255
+        )
     }
 }
 

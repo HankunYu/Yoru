@@ -293,3 +293,25 @@ speed, A-B loop).
   headers on its offscreen instance, so videos on servers get thumbnails too
   (`remote-thumbnails` in `yoru.conf`). A remote file that never opened is not cached as
   having no picture, since the network may have been the reason.
+
+## Contents panel, subtitle look and system integration
+
+- **Side panel**: the second-level panel holds either the adjustments or the contents
+  (`SidePanelContent`). Contents is two lists, the folder's playlist and the file's
+  chapters; chapter starts are also marked on the seek bar.
+- **Subtitle look**: color, outline, shadow, bold and background box are plain mpv
+  properties (`PlayerNumber`, `PlayerFlag`, `PlayerText`). Subtitles with their own styling
+  ignore them unless `sub-ass-override=force`. "Use This Look as Default" writes the set
+  to `mpv.conf`.
+- **Now playing**: mpv's audio output mixes with other apps unless `audio-exclusive=yes`,
+  and a mixing app never becomes the system's now-playing app, so that option is what makes
+  the lock screen and Control Center work at all. Artwork is the browser's thumbnail.
+- **Surface size before loading**: mpv's Vulkan context refuses to configure a surface of
+  unknown size (`moltenvk-surface-size`), which fails the whole video chain. The player
+  view is laid out before the player starts, so the size is sent ahead of `loadfile`; a
+  small local file otherwise decodes its first frame first.
+- **mpv saves on `loadfile` too**: with `save-position-on-quit`, loading a file over
+  another writes the outgoing one's resume file. For a finished file the option is turned
+  off across the load, or the entry just deleted would come back.
+- **User scripts**: verified on the device that a Lua script in `mpv/scripts/` is loaded,
+  receives events and reads properties.
