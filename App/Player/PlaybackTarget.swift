@@ -15,8 +15,6 @@ struct PlaybackTarget: Identifiable {
     /// access must be released with `endAccess()` when playback ends.
     private let securityScopedURL: URL?
 
-    private static let subtitleExtensions: Set<String> = ["srt", "ass", "ssa", "vtt", "sub", "sup", "smi"]
-
     init(location: String) {
         self.location = location
         externalSubtitles = []
@@ -44,7 +42,7 @@ struct PlaybackTarget: Identifiable {
         externalSubtitles = siblings
             .filter { sibling in
                 sibling.kind == .file
-                    && Self.subtitleExtensions.contains(sibling.url.pathExtension.lowercased())
+                    && sibling.mediaKind == .subtitle
                     && sibling.name.lowercased().hasPrefix(stem)
             }
             .map(\.url.absoluteString)

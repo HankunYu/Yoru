@@ -35,7 +35,8 @@ private struct FileCell: View {
         BrowserCellLayout(mode: mode, title: item.title) {
             MediaThumbnail(
                 image: preview?.image,
-                placeholder: "play.fill",
+                kind: item.mediaKind,
+                label: item.url.pathExtension.uppercased(),
                 cornerRadius: mode.coverCornerRadius,
                 progress: progress,
                 badge: mode == .grid ? preview?.info.durationLabel : nil
@@ -58,6 +59,8 @@ private struct FileCell: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: preview?.image != nil)
+        // Files that cannot be opened recede.
+        .opacity(item.mediaKind.isPlayable ? 1 : 0.5)
     }
 
     private var detail: String {
@@ -278,7 +281,9 @@ private struct BrowserCellLayout<Cover: View, Detail: View>: View {
 /// A 16:9 frame from a file, with an optional resume-progress line and corner badge.
 private struct MediaThumbnail: View {
     let image: UIImage?
-    let placeholder: String
+    /// Shown when there is no image: the kind's symbol over the file extension.
+    let kind: MediaKind
+    let label: String
     let cornerRadius: CGFloat
     var progress: Double?
     var badge: String?
@@ -294,11 +299,28 @@ private struct MediaThumbnail: View {
                         .scaledToFill()
                         .transition(.opacity)
                 } else {
-                    ZStack {
-                        Theme.card
-                        Image(systemName: placeholder)
-                            .font(.system(size: 18))
-                            .foregroundStyle(.white.opacity(0.22))
+                    GeometryReader { geometry in
+                        // Scaled with the tile, which is far smaller in the list than in the grid.
+                        let unit = geometry.size.height
+                        VStack(spacing: unit * 0.08) {
+                            Image(systemName: kind.symbol)
+                                .font(.system(size: unit * 0.30, weight: .medium))
+                            if !label.isEmpty {
+                                Text(label)
+                                    .font(.system(size: max(unit * 0.13, 8), weight: .bold, design: .rounded))
+                                    .lineLimit(1)
+                            }
+                        }
+                        .foregroundStyle(kind.tint)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background {
+                            LinearGradient(
+                                colors: [kind.tint.opacity(0.16), Theme.card],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            .background(Theme.card)
+                        }
                     }
                 }
             }

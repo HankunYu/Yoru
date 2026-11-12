@@ -17,6 +17,8 @@ struct BrowserItem: Identifiable, Hashable {
 
     var id: URL { url }
     var isDirectory: Bool { kind != .file }
+    /// Meaningful for files only.
+    var mediaKind: MediaKind { MediaKind(pathExtension: url.pathExtension) }
     /// The name as shown: files drop their extension, which moves to the detail line.
     var title: String { kind == .file ? (name as NSString).deletingPathExtension : name }
 

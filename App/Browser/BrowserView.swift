@@ -178,7 +178,7 @@ struct BrowserView: View {
     private func open(_ item: BrowserItem) {
         if item.isDirectory {
             path.append(item)
-        } else {
+        } else if item.mediaKind.isPlayable {
             playing = PlaybackTarget(item: item, siblings: items)
         }
     }
