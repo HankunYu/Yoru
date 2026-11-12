@@ -254,6 +254,7 @@ struct GestureSettings: View {
 
 struct StorageSettings: View {
     @Binding var player: PlayerOptions
+    @Binding var interface: YoruOptions
     @State private var thumbnailBytes = MediaPreviewStore.shared.diskUsage()
 
     private static let bufferSizes = [64, 300, 500]
@@ -273,6 +274,13 @@ struct StorageSettings: View {
                 Text("How much of a video is loaded ahead of playback. A larger buffer rides out slow moments on network files and uses more memory.")
             }
             Section {
+                Toggle(isOn: $interface.remoteThumbnails) {
+                    SettingLabel(
+                        "Thumbnails for Server Files",
+                        detail: "Reads a few megabytes of each video once to make its thumbnail.",
+                        symbol: "photo.badge.arrow.down"
+                    )
+                }
                 Button(role: .destructive) {
                     MediaPreviewStore.shared.clear()
                     thumbnailBytes = MediaPreviewStore.shared.diskUsage()

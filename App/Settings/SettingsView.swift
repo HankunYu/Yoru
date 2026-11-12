@@ -31,7 +31,10 @@ struct SettingsView: View {
                 }
             }
             .onChange(of: player) { previous, current in current.save(changedFrom: previous) }
-            .onChange(of: interface) { _, current in current.save() }
+            .onChange(of: interface) { _, current in
+                current.save()
+                MediaPreviewStore.shared.rendersRemoteFiles = current.remoteThumbnails
+            }
             // The files may have been edited as text in the meantime.
             .onAppear(perform: reload)
         }
@@ -55,7 +58,7 @@ struct SettingsView: View {
         case .audio: AudioSettings(player: $player)
         case .subtitles: SubtitleSettings(player: $player)
         case .gestures: GestureSettings(interface: $interface)
-        case .storage: StorageSettings(player: $player)
+        case .storage: StorageSettings(player: $player, interface: $interface)
         }
     }
 

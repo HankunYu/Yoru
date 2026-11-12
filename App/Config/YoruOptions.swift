@@ -29,6 +29,8 @@ struct YoruOptions: Equatable {
     /// Playback speed while a finger is held down.
     var holdSpeed = 2.0
     var endAction = EndAction.next
+    /// Make thumbnails for videos on servers, not just local ones.
+    var remoteThumbnails = true
 
     static let fileURL = ConfigDirectory.url.appending(path: "script-opts/yoru.conf")
 
@@ -56,6 +58,9 @@ struct YoruOptions: Equatable {
         if let value = file.value(for: "hold-speed"), let speed = Double(value), speed > 0 {
             options.holdSpeed = speed
         }
+        if let value = file.value(for: "remote-thumbnails") {
+            options.remoteThumbnails = value != "no"
+        }
         if let value = file.value(for: "at-end"), let action = EndAction(rawValue: value) {
             options.endAction = action
         }
@@ -72,6 +77,7 @@ struct YoruOptions: Equatable {
         file.set("swap-gesture-sides", to: Self.flag(swapsGestureSides))
         file.set("hold-speed", to: String(format: "%g", holdSpeed))
         file.set("at-end", to: endAction.rawValue)
+        file.set("remote-thumbnails", to: Self.flag(remoteThumbnails))
         file.save()
     }
 

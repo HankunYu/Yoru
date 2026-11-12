@@ -33,9 +33,10 @@ struct PlaybackTarget: Identifiable {
     /// Subtitle files to load with the file. mpv finds same-folder subtitles itself only
     /// for local files; for other sources the browser supplies them.
     let externalSubtitles: [String]
-    /// Whether to turn mpv's cache on explicitly. It does so on its own for network URLs it
-    /// opens itself, but streams served by the app look local to it.
+    /// Whether to turn mpv's cache on explicitly; see `PlaybackLocation`.
     let forcesCache: Bool
+    /// Request headers for an HTTP location, also sent for its subtitles.
+    let httpHeaders: [String]
     /// The browser item this came from, if it came from the browser.
     let itemURL: URL?
     /// Where previous and next lead; nil for a file opened on its own.
@@ -58,6 +59,7 @@ struct PlaybackTarget: Identifiable {
         self.location = location
         externalSubtitles = []
         forcesCache = false
+        httpHeaders = []
         initialSubtitleChoice = nil
         itemURL = nil
         securityScopedURL = nil
@@ -68,17 +70,14 @@ struct PlaybackTarget: Identifiable {
     init(item: BrowserItem, siblings: [BrowserItem]) {
         securityScopedURL = nil
         itemURL = item.url
-        guard !item.url.isFileURL else {
-            location = item.url.path
-            externalSubtitles = []
-            forcesCache = false
-            initialSubtitleChoice = nil
-            return
-        }
-        location = item.url.absoluteString
-        forcesCache = true
+        let source = MediaSources.source(for: item.url)
+        let playback = source.playback(of: item.url)
+        location = playback.location
+        forcesCache = playback.forcesCache
+        httpHeaders = playback.httpHeaders
         let options = PlayerOptions.load()
-        guard options.loadsExternalSubtitles else {
+        // mpv scans the folder of a local file itself.
+        guard !item.url.isFileURL, options.loadsExternalSubtitles else {
             externalSubtitles = []
             initialSubtitleChoice = nil
             return
@@ -91,7 +90,7 @@ struct PlaybackTarget: Identifiable {
                     && sibling.mediaKind == .subtitle
                     && sibling.name.lowercased().hasPrefix(stem)
             }
-            .map(\.url.absoluteString)
+            .map { source.playback(of: $0.url).location }
         // Later viewings restore whatever was chosen, including "off".
         if externalSubtitles.isEmpty || WatchHistory.shared.hasEntry(forLocation: location) {
             initialSubtitleChoice = nil
@@ -106,6 +105,7 @@ struct PlaybackTarget: Identifiable {
         location = url.path
         externalSubtitles = []
         forcesCache = false
+        httpHeaders = []
         initialSubtitleChoice = nil
         itemURL = nil
         securityScopedURL = url.startAccessingSecurityScopedResource() ? url : nil

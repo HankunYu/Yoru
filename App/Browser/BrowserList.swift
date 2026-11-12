@@ -13,9 +13,11 @@ struct BrowserList: UIViewRepresentable {
     let canDelete: (BrowserItem) -> Bool
     let onSelect: (BrowserItem) -> Void
     let onDelete: (BrowserItem) -> Void
+    /// Offered for servers, from the long-press menu.
+    let onEdit: (BrowserItem) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(mode: mode, canDelete: canDelete, onSelect: onSelect, onDelete: onDelete)
+        Coordinator(mode: mode, canDelete: canDelete, onSelect: onSelect, onDelete: onDelete, onEdit: onEdit)
     }
 
     func makeUIView(context: Context) -> UICollectionView {
@@ -34,6 +36,7 @@ struct BrowserList: UIViewRepresentable {
         context.coordinator.canDelete = canDelete
         context.coordinator.onSelect = onSelect
         context.coordinator.onDelete = onDelete
+        context.coordinator.onEdit = onEdit
         context.coordinator.apply(items, mode: mode)
     }
 
@@ -42,6 +45,7 @@ struct BrowserList: UIViewRepresentable {
         var canDelete: (BrowserItem) -> Bool
         var onSelect: (BrowserItem) -> Void
         var onDelete: (BrowserItem) -> Void
+        var onEdit: (BrowserItem) -> Void
         private var mode: BrowserViewMode
         private weak var collectionView: UICollectionView?
         private var dataSource: UICollectionViewDiffableDataSource<Int, BrowserItem>?
@@ -59,12 +63,14 @@ struct BrowserList: UIViewRepresentable {
             mode: BrowserViewMode,
             canDelete: @escaping (BrowserItem) -> Bool,
             onSelect: @escaping (BrowserItem) -> Void,
-            onDelete: @escaping (BrowserItem) -> Void
+            onDelete: @escaping (BrowserItem) -> Void,
+            onEdit: @escaping (BrowserItem) -> Void
         ) {
             self.mode = mode
             self.canDelete = canDelete
             self.onSelect = onSelect
             self.onDelete = onDelete
+            self.onEdit = onEdit
         }
 
         func attach(to collectionView: UICollectionView) {
@@ -184,19 +190,29 @@ struct BrowserList: UIViewRepresentable {
             contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
             point: CGPoint
         ) -> UIContextMenuConfiguration? {
-            guard let indexPath = indexPaths.first, let item = dataSource?.itemIdentifier(for: indexPath),
-                  canDelete(item) else {
+            guard let indexPath = indexPaths.first, let item = dataSource?.itemIdentifier(for: indexPath) else {
                 return nil
             }
+            let isServer = item.kind == .server
+            let isDeletable = canDelete(item)
+            guard isServer || isDeletable else { return nil }
             return UIContextMenuConfiguration(actionProvider: { [weak self] _ in
-                let delete = UIAction(
-                    title: String(localized: "Delete"),
-                    image: UIImage(systemName: "trash"),
-                    attributes: .destructive
-                ) { _ in
-                    self?.onDelete(item)
+                var actions: [UIAction] = []
+                if isServer {
+                    actions.append(UIAction(title: String(localized: "Edit"), image: UIImage(systemName: "pencil")) { _ in
+                        self?.onEdit(item)
+                    })
                 }
-                return UIMenu(children: [delete])
+                if isDeletable {
+                    actions.append(UIAction(
+                        title: String(localized: "Delete"),
+                        image: UIImage(systemName: "trash"),
+                        attributes: .destructive
+                    ) { _ in
+                        self?.onDelete(item)
+                    })
+                }
+                return UIMenu(children: actions)
             })
         }
     }

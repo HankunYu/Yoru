@@ -19,6 +19,7 @@ struct BrowserView: View {
     @State private var importer = FileImporter()
     @State private var isShowingSettings = false
     @State private var isAddingServer = false
+    @State private var editedServer: MediaServer?
     // App UI state, not mpv configuration, so it lives in UserDefaults.
     @AppStorage("browser.viewMode") private var viewMode = BrowserViewMode.grid
     @AppStorage("browser.sortOrder") private var sortOrder = BrowserSortOrder.name
@@ -30,14 +31,14 @@ struct BrowserView: View {
 
     private var title: String {
         if isRoot { return "YORU" }
-        if let (serverID, path) = SMBSource.parse(directory), path.isEmpty {
+        if let (serverID, path) = MediaServer.parse(directory), path.isEmpty {
             return servers.server(serverID)?.name ?? ""
         }
         return directory.lastPathComponent
     }
 
     var body: some View {
-        BrowserList(items: items, mode: viewMode, canDelete: canDelete, onSelect: open, onDelete: delete)
+        BrowserList(items: items, mode: viewMode, canDelete: canDelete, onSelect: open, onDelete: delete, onEdit: edit)
             .ignoresSafeArea()
             .background { BrowserBackground() }
         .overlay(alignment: .bottom) {
@@ -115,7 +116,10 @@ struct BrowserView: View {
             }
         }
         .sheet(isPresented: $isAddingServer) {
-            AddServerView()
+            ServerEditorView()
+        }
+        .sheet(item: $editedServer) { server in
+            ServerEditorView(editing: server)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsView()
@@ -184,6 +188,11 @@ struct BrowserView: View {
         }
     }
 
+    private func edit(_ item: BrowserItem) {
+        guard let (serverID, _) = MediaServer.parse(item.url) else { return }
+        editedServer = servers.server(serverID)
+    }
+
     private func canDelete(_ item: BrowserItem) -> Bool {
         item.kind == .server || source.supportsDeletion
     }
@@ -191,7 +200,7 @@ struct BrowserView: View {
     private func delete(_ item: BrowserItem) {
         if item.kind == .server {
             // Removing a server forgets it and its password; nothing on the server changes.
-            if let (serverID, _) = SMBSource.parse(item.url) {
+            if let (serverID, _) = MediaServer.parse(item.url) {
                 servers.remove(serverID)
             }
             return

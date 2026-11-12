@@ -51,11 +51,9 @@ private struct FileCell: View {
             }
         }
         .task {
-            // Thumbnails are generated for local files only.
-            guard item.url.isFileURL else { return }
-            preview = MediaPreviewStore.shared.cachedPreview(for: item.url)
+            preview = MediaPreviewStore.shared.cachedPreview(for: item)
             if preview == nil {
-                preview = await MediaPreviewStore.shared.preview(for: item.url)
+                preview = await MediaPreviewStore.shared.preview(for: item)
             }
         }
         .animation(.easeOut(duration: 0.2), value: preview?.image != nil)
@@ -169,8 +167,8 @@ private struct ServerCell: View {
     }
 
     private var host: String? {
-        guard let (serverID, _) = SMBSource.parse(item.url) else { return nil }
-        return ServerStore.shared.server(serverID)?.host
+        guard let (serverID, _) = MediaServer.parse(item.url) else { return nil }
+        return ServerStore.shared.server(serverID)?.address
     }
 }
 
@@ -178,12 +176,12 @@ private struct ServerCell: View {
 private struct FolderPeek: Sendable {
     let count: Int
     /// The first few files by name, candidates for the cover.
-    let leadingFiles: [URL]
+    let leadingFiles: [BrowserItem]
 
     init(_ directory: URL) {
         let items = LocalSource.items(in: directory).sorted(by: .name)
         count = items.count
-        leadingFiles = items.lazy.filter { $0.kind == .file }.prefix(3).map(\.url)
+        leadingFiles = Array(items.lazy.filter { $0.kind == .file }.prefix(3))
     }
 }
 

@@ -2,19 +2,29 @@ import CryptoKit
 import ImageIO
 import UIKit
 import UniformTypeIdentifiers
+import os
 
-/// Thumbnails and media facts for local files, generated on demand and cached on disk.
+/// Thumbnails and media facts for files, generated on demand and cached on disk.
 ///
-/// Entries live in the Caches directory, keyed by path, size and modification date, so a
-/// replaced file gets a new thumbnail and the system may reclaim the space at any time.
+/// Entries live in the Caches directory, keyed by location, size and modification date, so
+/// a replaced file gets a new thumbnail and the system may reclaim the space at any time.
 final class MediaPreviewStore: Sendable {
     static let shared = MediaPreviewStore()
 
-    // One file at a time: each generation decodes video in software.
-    private let queue = DispatchQueue(label: "com.hankunyu.Yoru.previews", qos: .utility)
+    // A few files at a time. Each generation runs its own mpv instance and decodes in
+    // software, so the limit keeps memory and heat in check.
+    private let queue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "com.hankunyu.Yoru.previews"
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = 4
+        return queue
+    }()
+    private let suspensions = OSAllocatedUnfairLock(initialState: 0)
     private let directory = URL.cachesDirectory.appending(path: "Previews", directoryHint: .isDirectory)
     // NSCache is thread-safe; the box makes the value an object.
     private nonisolated(unsafe) let memory = NSCache<NSString, Box>()
+    private let rendersRemote = OSAllocatedUnfairLock(initialState: YoruOptions.load().remoteThumbnails)
 
     private final class Box {
         let preview: MediaPreview
@@ -26,19 +36,34 @@ final class MediaPreviewStore: Sendable {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    /// The preview already held in memory, for showing a recycled cell without a flash.
-    func cachedPreview(for url: URL) -> MediaPreview? {
-        memory.object(forKey: url.path as NSString)?.preview
+    /// Whether files on servers get thumbnails. Each one costs a connection and a few
+    /// megabytes of reading, so it can be turned off.
+    var rendersRemoteFiles: Bool {
+        get { rendersRemote.withLock { $0 } }
+        set { rendersRemote.withLock { $0 = newValue } }
     }
 
-    /// Loads the preview from the cache or generates it. Returns nil if the task was
-    /// cancelled before its turn came.
-    func preview(for url: URL) async -> MediaPreview? {
-        if let cached = cachedPreview(for: url) { return cached }
+    /// Whether `item` is something a thumbnail is made for at all.
+    func isEligible(_ item: BrowserItem) -> Bool {
+        if item.url.isFileURL { return true }
+        // Remote files are only worth the transfer when they have a picture.
+        return rendersRemoteFiles && (item.mediaKind == .video || item.mediaKind == .image)
+    }
+
+    /// The preview already held in memory, for showing a recycled cell without a flash.
+    func cachedPreview(for item: BrowserItem) -> MediaPreview? {
+        memory.object(forKey: item.url.absoluteString as NSString)?.preview
+    }
+
+    /// Loads the preview from the cache or generates it. Returns nil if the item is not
+    /// eligible, or the task was cancelled before its turn came.
+    func preview(for item: BrowserItem) async -> MediaPreview? {
+        guard isEligible(item) else { return nil }
+        if let cached = cachedPreview(for: item) { return cached }
         let task = Task.detached(priority: .utility) { [self] () -> MediaPreview? in
             await withCheckedContinuation { continuation in
-                queue.async { [self] in
-                    continuation.resume(returning: Task.isCancelled ? nil : load(url))
+                queue.addOperation { [self] in
+                    continuation.resume(returning: Task.isCancelled ? nil : load(item))
                 }
             }
         }
@@ -68,13 +93,24 @@ final class MediaPreviewStore: Sendable {
 
     /// Pauses generation, e.g. during playback, which should not compete for the CPU.
     /// Must be balanced by `resume()`.
-    func suspend() { queue.suspend() }
-    func resume() { queue.resume() }
+    func suspend() {
+        suspensions.withLock { count in
+            count += 1
+            queue.isSuspended = true
+        }
+    }
 
-    // MARK: - Private (runs on `queue`)
+    func resume() {
+        suspensions.withLock { count in
+            count -= 1
+            queue.isSuspended = count > 0
+        }
+    }
 
-    private func load(_ url: URL) -> MediaPreview {
-        let key = cacheKey(for: url)
+    // MARK: - Private (runs on `queue`, several at once)
+
+    private func load(_ item: BrowserItem) -> MediaPreview {
+        let key = cacheKey(for: item)
         let imageURL = directory.appending(path: key + ".jpg")
         let infoURL = directory.appending(path: key + ".json")
 
@@ -82,27 +118,36 @@ final class MediaPreviewStore: Sendable {
         if let data = try? Data(contentsOf: infoURL), let info = try? JSONDecoder().decode(MediaInfo.self, from: data) {
             preview = MediaPreview(image: UIImage(contentsOfFile: imageURL.path)?.preparingForDisplay(), info: info)
         } else {
-            let rendered = ThumbnailRenderer.render(path: url.path)
+            let playback = MediaSources.source(for: item.url).playback(of: item.url)
+            let rendered = ThumbnailRenderer.render(playback)
             if let image = rendered.image {
                 write(image, to: imageURL)
             }
-            // Written even without an image, so unreadable files are not retried every time.
-            try? JSONEncoder().encode(rendered.info).write(to: infoURL)
+            // A result without an image is remembered too, so unreadable files are not
+            // retried every time. Not for a remote file that never opened, though: that
+            // may have been the network, and is worth another try.
+            if rendered.image != nil || rendered.info.duration != nil || item.url.isFileURL {
+                try? JSONEncoder().encode(rendered.info).write(to: infoURL)
+            }
             preview = MediaPreview(image: rendered.image.map { UIImage(cgImage: $0) }, info: rendered.info)
         }
-        memory.setObject(Box(preview), forKey: url.path as NSString)
+        memory.setObject(Box(preview), forKey: item.url.absoluteString as NSString)
         return preview
     }
 
-    private func cacheKey(for url: URL) -> String {
-        let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-        let stamp = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
-        // Relative to the app's container: its absolute path changes whenever the app is
-        // reinstalled, which would orphan every cached entry.
-        let home = URL.homeDirectory.resolvingSymlinksInPath().path
-        let path = url.resolvingSymlinksInPath().path
-        let stablePath = path.hasPrefix(home) ? String(path.dropFirst(home.count)) : path
-        let identity = "\(ThumbnailRenderer.version)|\(stablePath)|\(values?.fileSize ?? 0)|\(stamp)"
+    private func cacheKey(for item: BrowserItem) -> String {
+        let location: String
+        if item.url.isFileURL {
+            // Relative to the app's container: its absolute path changes whenever the app
+            // is reinstalled, which would orphan every cached entry.
+            let home = URL.homeDirectory.resolvingSymlinksInPath().path
+            let path = item.url.resolvingSymlinksInPath().path
+            location = path.hasPrefix(home) ? String(path.dropFirst(home.count)) : path
+        } else {
+            location = item.url.absoluteString
+        }
+        let stamp = item.modified?.timeIntervalSince1970 ?? 0
+        let identity = "\(ThumbnailRenderer.version)|\(location)|\(item.size ?? 0)|\(stamp)"
         return SHA256.hash(data: Data(identity.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 

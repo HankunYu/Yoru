@@ -39,7 +39,7 @@ final class SMBSession: Sendable {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
                 do {
-                    guard let credentials = ServerStore.credentials(for: serverID) else {
+                    guard let credentials = SMBCredentials(serverID: serverID) else {
                         throw SMBError(code: ENOENT)
                     }
                     if let reused = connection {

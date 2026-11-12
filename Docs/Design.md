@@ -274,3 +274,22 @@ speed, A-B loop).
 - **Adjustments panel**: slides in from the trailing edge or the bottom and can be dragged
   away. It keeps one margin to every display edge, ignores the safe area and steps aside
   only for an occlusion that overlaps it, and its outline is concentric with the display.
+
+## Servers: WebDAV, editing and thumbnails
+
+- **One server model**: `MediaServer` has a kind (`smb`, `webdav`), a name, an address
+  (the host for SMB, the base URL for WebDAV) and a username; the password stays in the
+  Keychain. Each kind has its own URL scheme, `yoru-smb` or `yoru-dav`, followed by the
+  server's identifier, so browser URLs never hold an address or a login.
+- **Playback is the source's business**: `MediaSource.playback(of:)` returns what mpv
+  gets. SMB hands over the browser URL, served by the app. WebDAV hands over the file's
+  real URL plus an `Authorization` header (`http-header-fields`), and mpv plays it over
+  its own HTTP. The header is replaced on every load, so it never reaches another server.
+- **WebDAV listing**: `WebDAVClient` sends PROPFIND with depth 1 and HTTP Basic up front.
+  Plain HTTP is allowed (`NSAllowsArbitraryLoads`), as home servers often have no TLS.
+- **Editing**: `ServerEditorView` adds or edits; an empty password field keeps the stored
+  one, and the server is saved only after a listing with the entered values succeeds.
+- **Remote thumbnails**: `ThumbnailRenderer` registers the app's stream protocols and
+  headers on its offscreen instance, so videos on servers get thumbnails too
+  (`remote-thumbnails` in `yoru.conf`). A remote file that never opened is not cached as
+  having no picture, since the network may have been the reason.

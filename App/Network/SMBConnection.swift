@@ -7,6 +7,18 @@ struct SMBCredentials: Sendable {
     /// Empty for guest access.
     let username: String
     let password: String
+
+    /// The login of a saved SMB server; nil if it is gone or of another kind.
+    init?(serverID: UUID) {
+        guard let (server, password) = ServerStore.login(for: serverID), server.kind == .smb else { return nil }
+        self.init(host: server.address, username: server.username, password: password)
+    }
+
+    init(host: String, username: String, password: String) {
+        self.host = host
+        self.username = username
+        self.password = password
+    }
 }
 
 struct SMBError: Error, LocalizedError {

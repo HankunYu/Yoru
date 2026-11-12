@@ -56,15 +56,24 @@ targets:
         UIBackgroundModes: [audio]
         NSLocalNetworkUsageDescription: YORU plays media from servers on your local network.
         NSBonjourServices: [_smb._tcp]
+        # WebDAV servers on a home network are often plain HTTP.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
         CFBundleDocumentTypes:
+          # System-declared containers (mp4, mov, avi, ts, m2ts, mp3, flac, ...) are covered
+          # by these two umbrella types. The system previews most of them itself, so YORU
+          # only offers to open them.
           - CFBundleTypeName: Media
             CFBundleTypeRole: Viewer
             LSHandlerRank: Alternate
             LSItemContentTypes:
-              # System-declared containers (mp4, mov, avi, ts, m2ts, mp3, flac, ...) are
-              # covered by these two umbrella types.
               - public.movie
               - public.audio
+          # Containers the system cannot play: YORU asks to be the preferred handler.
+          - CFBundleTypeName: Media
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Default
+            LSItemContentTypes:
               - org.matroska.mkv
               - org.webmproject.webm
               - com.adobe.flash.video

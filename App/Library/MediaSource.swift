@@ -1,21 +1,41 @@
 import Foundation
 
 /// A place media is browsed and played from. Every item is addressed by a URL whose scheme
-/// names its source: `file` for the app's Documents, `yoru-smb` for a saved SMB server.
+/// names its source: `file` for the app's Documents, `yoru-smb` and `yoru-dav` for saved
+/// servers (see `MediaServer`).
 protocol MediaSource: Sendable {
     /// The entries of `directory`, in no particular order.
     func contents(of directory: URL) async throws -> [BrowserItem]
     var supportsDeletion: Bool { get }
     func delete(_ item: BrowserItem) throws
+    /// How mpv opens the item at `url`.
+    func playback(of url: URL) -> PlaybackLocation
+}
+
+/// What to hand mpv to play an item.
+struct PlaybackLocation {
+    /// A file path or a URL mpv can open.
+    var location: String
+    /// Whether to turn mpv's cache on explicitly. It does so on its own for network URLs it
+    /// opens itself, but streams served by the app look local to it.
+    var forcesCache = false
+    /// Request headers for HTTP locations (`http-header-fields`), e.g. authorization.
+    var httpHeaders: [String] = []
 }
 
 enum MediaSources {
     static func source(for url: URL) -> any MediaSource {
-        url.scheme == SMBSource.scheme ? SMBSource() : LocalSource()
+        switch url.scheme {
+        case MediaServer.Kind.smb.scheme: SMBSource()
+        case MediaServer.Kind.webDAV.scheme: WebDAVSource()
+        default: LocalSource()
+        }
     }
 
     /// The URL schemes the app serves to mpv itself.
-    static let streamProtocols: [String: MPVStreamOpener] = [SMBSource.scheme: SMBSource.openStream]
+    static let streamProtocols: [String: MPVStreamOpener] = [
+        MediaServer.Kind.smb.scheme: SMBSource.openStream,
+    ]
 }
 
 // MARK: - Local files
@@ -29,6 +49,10 @@ struct LocalSource: MediaSource {
 
     func delete(_ item: BrowserItem) throws {
         try FileManager.default.removeItem(at: item.url)
+    }
+
+    func playback(of url: URL) -> PlaybackLocation {
+        PlaybackLocation(location: url.path)
     }
 
     /// The visible entries of `directory`, minus the mpv config directory, which is managed
@@ -62,22 +86,15 @@ struct LocalSource: MediaSource {
 /// The URL carries the server's identifier rather than its address and login, so nothing
 /// secret ends up in mpv's logs or resume files; credentials are looked up when connecting.
 struct SMBSource: MediaSource {
-    static let scheme = "yoru-smb"
-
     let supportsDeletion = false
 
-    static func rootURL(for server: SMBServer) -> URL {
-        URL(string: "\(scheme)://\(server.id.uuidString.lowercased())/")!
-    }
-
-    /// Splits a source URL into the server and the path components below it.
-    static func parse(_ url: URL) -> (serverID: UUID, path: [String])? {
-        guard url.scheme == scheme, let host = url.host(), let serverID = UUID(uuidString: host) else { return nil }
-        return (serverID, url.pathComponents.filter { $0 != "/" })
+    /// mpv opens the browser URL itself, through `openStream`.
+    func playback(of url: URL) -> PlaybackLocation {
+        PlaybackLocation(location: url.absoluteString, forcesCache: true)
     }
 
     func contents(of directory: URL) async throws -> [BrowserItem] {
-        guard let (serverID, path) = Self.parse(directory) else { throw SMBError(code: ENOENT) }
+        guard let (serverID, path) = MediaServer.parse(directory) else { throw SMBError(code: ENOENT) }
         let entries = try await SMBSession.session(for: serverID).run { connection throws(SMBError) in
             path.isEmpty ? try connection.shares() : try connection.contents(of: path)
         }
@@ -98,13 +115,53 @@ struct SMBSource: MediaSource {
 
     /// Opens a file for mpv. Runs on an mpv thread.
     static let openStream: MPVStreamOpener = { location in
-        guard let url = URL(string: location), let (serverID, path) = parse(url),
-              let credentials = ServerStore.credentials(for: serverID) else { return nil }
+        guard let url = URL(string: location), let (serverID, path) = MediaServer.parse(url),
+              let credentials = SMBCredentials(serverID: serverID) else { return nil }
         do {
             return try SMBStream(credentials: credentials, path: path)
         } catch {
             Log.app.error("Opening an SMB stream failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+}
+
+// MARK: - WebDAV
+
+/// Saved WebDAV servers, addressed as `yoru-dav://<server id>/<path below the base URL>`.
+///
+/// Listing goes through `WebDAVClient`. Playback is mpv's own HTTP: it gets the file's real
+/// URL, which holds no login, and the authorization as a request header.
+struct WebDAVSource: MediaSource {
+    let supportsDeletion = false
+
+    func contents(of directory: URL) async throws -> [BrowserItem] {
+        guard let (serverID, path) = MediaServer.parse(directory), let client = WebDAVClient(serverID: serverID) else {
+            throw WebDAVError(reason: .notFound)
+        }
+        return try await client.contents(of: path).map { entry in
+            BrowserItem(
+                url: directory.appending(component: entry.name, directoryHint: entry.isDirectory ? .isDirectory : .notDirectory),
+                kind: entry.isDirectory ? .folder : .file,
+                name: entry.name,
+                size: entry.size,
+                modified: entry.modified
+            )
+        }
+    }
+
+    func delete(_ item: BrowserItem) throws {
+        throw WebDAVError(reason: .status(405))
+    }
+
+    func playback(of url: URL) -> PlaybackLocation {
+        guard let (serverID, path) = MediaServer.parse(url), let client = WebDAVClient(serverID: serverID),
+              let location = client.url(for: path) else {
+            return PlaybackLocation(location: url.absoluteString)
+        }
+        return PlaybackLocation(
+            location: location.absoluteString,
+            httpHeaders: client.authorization.map { ["Authorization: \($0)"] } ?? []
+        )
     }
 }

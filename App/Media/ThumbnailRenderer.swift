@@ -39,22 +39,30 @@ enum ThumbnailRenderer {
         ("terminal", "no"),
     ]
 
-    /// Opens `path` and returns a frame (nil if the file has no picture or cannot be read)
+    /// Opens a file and returns a frame (nil if it has no picture or cannot be read)
     /// together with what was learned about the file.
-    static func render(path: String) -> (image: CGImage?, info: MediaInfo) {
+    static func render(_ playback: PlaybackLocation) -> (image: CGImage?, info: MediaInfo) {
         var info = MediaInfo()
         guard let handle = mpv_create() else { return (nil, info) }
-        defer { mpv_terminate_destroy(handle) }
+        var streamProtocols: [MPVStreamProtocol] = []
+        // The protocols must outlive the handle: mpv closes its streams while shutting down.
+        defer { withExtendedLifetime(streamProtocols) { mpv_terminate_destroy(handle) } }
         for (name, value) in options {
             mpv_set_option_string(handle, name, value)
+        }
+        if !playback.httpHeaders.isEmpty {
+            mpv_set_option_string(handle, "http-header-fields", playback.httpHeaders.joined(separator: ","))
         }
         mpv_request_log_messages(handle, "no")
         guard mpv_initialize(handle) >= 0, let context = makeRenderContext(handle) else {
             return (nil, info)
         }
         defer { mpv_render_context_free(context) }
+        streamProtocols = MediaSources.streamProtocols.map { scheme, opener in
+            MPVStreamProtocol.register(scheme, opener: opener, on: handle)
+        }
 
-        var arguments: [UnsafePointer<CChar>?] = [strdup("loadfile"), strdup(path), nil].map { UnsafePointer($0) }
+        var arguments: [UnsafePointer<CChar>?] = [strdup("loadfile"), strdup(playback.location), nil].map { UnsafePointer($0) }
         defer { arguments.forEach { free(UnsafeMutablePointer(mutating: $0)) } }
         guard mpv_command(handle, &arguments) >= 0 else { return (nil, info) }
 

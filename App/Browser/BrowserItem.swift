@@ -30,8 +30,8 @@ struct BrowserItem: Identifiable, Hashable {
         self.modified = modified
     }
 
-    init(server: SMBServer) {
-        self.init(url: SMBSource.rootURL(for: server), kind: .server, name: server.name, size: nil, modified: nil)
+    init(server: MediaServer) {
+        self.init(url: server.rootURL, kind: .server, name: server.name, size: nil, modified: nil)
     }
 }
 
