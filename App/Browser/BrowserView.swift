@@ -173,12 +173,15 @@ struct BrowserView: View {
                     if isRoot {
                         Button("Add Server", systemImage: "server.rack") { isAddingServer = true }
                     }
-                    if isLocal {
+                    if isRoot {
                         Button("Open Location", systemImage: "link") { isEnteringLocation = true }
+                    } else if isLocal {
+                        // Back to the top, which can be many folders up.
+                        Button("Home", systemImage: "house") { path = [] }
                     } else {
-                        // Back to the server's top level, which can be many folders up. The
-                        // path is rebuilt rather than trimmed: a bookmark leads straight
-                        // into a folder, without the server as its first step.
+                        // On a server the top is the server's own. The path is rebuilt
+                        // rather than trimmed: a bookmark leads straight into a folder,
+                        // without the server as its first step.
                         Button("Home", systemImage: "house") {
                             if let server = currentServer {
                                 path = [BrowserItem(server: server)]

@@ -379,9 +379,26 @@ speed, A-B loop).
 - **`BlockCachedStream`** wraps every app-served stream: 1 MB blocks, the 8 most recently
   used kept. A seek only moves a position. Needed for files whose audio and video are
   not interleaved: FFmpeg seeks between the two regions for nearly every packet and,
-  for non-local input, refills a buffer of up to 16 MB after each seek. WebDAV is read
-  by FFmpeg's own HTTP code and does not pass through here.
+  for non-local input, refills a buffer of up to 16 MB after each seek.
+- **WebDAV is served by the app too** (`WebDAVStream`): one range request per read on a
+  kept-alive connection, behind the same block cache. FFmpeg's own HTTP reconnects on
+  every seek. The server must honor `Range`. Files are identified as
+  `yoru-dav://<server id>/<path>`, like SMB, so no login is handed to mpv.
+- **Streams can be cancelled** (`MPVStreamSource.cancel`, libmpv's `cancel_fn`), so
+  closing the player does not wait for a stalled request.
 - **Images are recognized by content** (fork release `yoru-0.41.0-3` adds FFmpeg's image
   pipe demuxers); before, mpv chose the decoder from the file extension alone.
 - **Remembered thumbnail failures expire** when `MediaPreviewStore.decoderGeneration`
   changes; bump it whenever the fork's FFmpeg gains formats.
+
+## Seek bar and thumbnail cache
+
+- **Dragging the seek bar is relative**: the position moves from where it is by the
+  finger's travel, a full bar being the whole duration. Position and bar width are taken
+  when the drag starts. A touch that does not move does nothing.
+- **The bar keeps its length**: the position label reserves the duration label's width.
+  Fills and chapter marks are clipped to the track's capsule.
+- **The thumbnail cache is capped** at 400 MB, least recently shown first, trimmed to 80 %
+  at launch and every 64 writes.
+- **Home** in the browser: local subfolders go back to the root, server folders to the
+  server's top. Open Location is offered at the root only.
