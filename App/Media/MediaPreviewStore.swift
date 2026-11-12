@@ -55,6 +55,21 @@ final class MediaPreviewStore: Sendable {
         memory.object(forKey: item.url.absoluteString as NSString)?.preview
     }
 
+    /// The preview if one exists already, in memory or on disk; never generates one, and
+    /// does not wait behind generation, so it works while that is suspended.
+    func existingPreview(for item: BrowserItem) async -> MediaPreview? {
+        if let cached = cachedPreview(for: item) { return cached }
+        return await Task.detached(priority: .userInitiated) { [self] in
+            let key = cacheKey(for: item)
+            guard let image = UIImage(contentsOfFile: directory.appending(path: key + ".jpg").path) else {
+                return nil
+            }
+            let info = (try? Data(contentsOf: directory.appending(path: key + ".json")))
+                .flatMap { try? JSONDecoder().decode(MediaInfo.self, from: $0) }
+            return MediaPreview(image: image, info: info ?? MediaInfo())
+        }.value
+    }
+
     /// Loads the preview from the cache or generates it. Returns nil if the item is not
     /// eligible, or the task was cancelled before its turn came.
     func preview(for item: BrowserItem) async -> MediaPreview? {

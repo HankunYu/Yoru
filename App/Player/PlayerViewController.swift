@@ -215,8 +215,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         model.playlist = items.count > 1 ? items.enumerated().map { PlaylistEntry(id: $0, title: $1.title) } : []
         model.playlistIndex = index
         // Whatever thumbnail the browser already has serves as the lock screen artwork.
-        let item = index.map { items[$0] }
-        model.artwork = item.flatMap { MediaPreviewStore.shared.cachedPreview(for: $0)?.image }
+        // Looked up without generating: generation is suspended during playback.
+        model.artwork = nil
+        if let item = index.map({ items[$0] }) {
+            Task { [weak self] in
+                let image = await MediaPreviewStore.shared.existingPreview(for: item)?.image
+                // The player may have moved on to another file meanwhile.
+                if self?.target.itemURL == item.url {
+                    self?.model.artwork = image
+                }
+            }
+        }
         model.initialSubtitleChoice = target.initialSubtitleChoice
         model.beginLoading()
 
