@@ -1,16 +1,31 @@
 import Foundation
 
-/// The files a playback can move through: the opened file's folder, in the browser's order.
+/// The files a playback can move through: what the browser listed when one was opened,
+/// in its order. That is a folder, or the results of a search.
 struct PlaybackQueue {
     /// The files of the opened one's kind (videos or audio), in order.
     let items: [BrowserItem]
-    /// Everything in the folder, for finding each file's subtitles.
+    /// Everything listed, for finding each file's subtitles when the files share a folder.
     let siblings: [BrowserItem]
+    /// For search results from several folders: what each folder holds, by `folderKey`.
+    let listings: [String: [BrowserItem]]
 
-    init(startingAt item: BrowserItem, among siblings: [BrowserItem]) {
+    init(startingAt item: BrowserItem, among siblings: [BrowserItem], listings: [String: [BrowserItem]] = [:]) {
         let kind = item.mediaKind
         items = siblings.filter { $0.kind == .file && $0.mediaKind == kind }
         self.siblings = siblings
+        self.listings = listings
+    }
+
+    /// Names a folder the same way whether its URL ends in a slash or not.
+    static func folderKey(_ folder: URL) -> String {
+        let text = folder.absoluteString
+        return text.hasSuffix("/") ? String(text.dropLast()) : text
+    }
+
+    /// The files beside `item`, among which its subtitles are looked for.
+    func siblings(of item: BrowserItem) -> [BrowserItem] {
+        listings[Self.folderKey(item.url.deletingLastPathComponent())] ?? siblings
     }
 
     func index(of target: PlaybackTarget) -> Int? {
@@ -19,7 +34,7 @@ struct PlaybackQueue {
 
     @MainActor
     func target(at index: Int) -> PlaybackTarget {
-        var target = PlaybackTarget(item: items[index], siblings: siblings)
+        var target = PlaybackTarget(item: items[index], siblings: siblings(of: items[index]))
         target.queue = self
         return target
     }

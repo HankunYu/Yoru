@@ -34,6 +34,14 @@ struct BrowserView: View {
     @AppStorage("browser.mediaOnly") private var showsMediaOnly = false
     private let servers = ServerStore.shared
     private let bookmarks = BookmarkStore.shared
+    @State private var searchText = ""
+    @State private var searchScope = SearchScope.folder
+    // What a search of the subfolders has found so far, and what each folder it looked
+    // into holds: a result's subtitles are found among its own folder's files.
+    @State private var deepResults: [BrowserItem] = []
+    @State private var deepListings: [String: [BrowserItem]] = [:]
+    @State private var isSearchingDeep = false
+    @State private var searchTask: Task<Void, Never>?
 
     private struct Relocation: Identifiable {
         enum Purpose {
@@ -58,7 +66,21 @@ struct BrowserView: View {
     private var visibleItems: [BrowserItem] {
         showsMediaOnly ? items.filter { $0.kind != .file || $0.mediaKind == .video || $0.mediaKind == .audio } : items
     }
-    private var pickedItems: [BrowserItem] { visibleItems.filter { selection?.contains($0.url) == true } }
+    private var query: SearchQuery { SearchQuery(searchText) }
+    /// What the list shows: the folder, or what a search found.
+    private var shownItems: [BrowserItem] {
+        let query = query
+        if query.isEmpty { return visibleItems }
+        switch searchScope {
+        case .folder:
+            return visibleItems.filter { query.matches($0.name) }
+        case .subfolders:
+            return showsMediaOnly
+                ? deepResults.filter { $0.kind != .file || $0.mediaKind == .video || $0.mediaKind == .audio }
+                : deepResults
+        }
+    }
+    private var pickedItems: [BrowserItem] { shownItems.filter { selection?.contains($0.url) == true } }
     private var isRoot: Bool { directory == URL.documentsDirectory }
     private var isLocal: Bool { directory.isFileURL }
     private var currentServer: MediaServer? {
@@ -75,7 +97,7 @@ struct BrowserView: View {
 
     var body: some View {
         BrowserList(
-            items: visibleItems, mode: viewMode, selection: selection,
+            items: shownItems, mode: viewMode, selection: selection,
             canDelete: canDelete, onSelect: open, onDelete: delete, actions: { actions(for: $0) }
         )
             .ignoresSafeArea()
@@ -83,8 +105,26 @@ struct BrowserView: View {
         .safeAreaInset(edge: .bottom) {
             if selection != nil {
                 selectionBar
+            } else if isSearchingDeep {
+                Label {
+                    Text("Searching…")
+                } icon: {
+                    ProgressView()
+                }
+                .font(.footnote)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .glassEffect(.regular, in: .capsule)
+                .padding(.bottom, 8)
             }
         }
+        .searchable(text: $searchText, prompt: Text("Search"))
+        .searchScopes($searchScope, activation: .onSearchPresentation) {
+            Text("This Folder").tag(SearchScope.folder)
+            Text("Subfolders").tag(SearchScope.subfolders)
+        }
+        .onChange(of: searchText) { searchSubfolders() }
+        .onChange(of: searchScope) { searchSubfolders() }
         .alert("Could Not Complete", isPresented: Binding(
             get: { operationFailure != nil }, set: { if !$0 { operationFailure = nil } }
         )) {
@@ -112,6 +152,10 @@ struct BrowserView: View {
                 } actions: {
                     Button("Import") { isImporting = true }
                         .buttonStyle(.glass)
+                }
+            } else if !query.isEmpty {
+                if shownItems.isEmpty, !isSearchingDeep {
+                    ContentUnavailableView.search(text: searchText)
                 }
             } else if visibleItems.isEmpty {
                 ContentUnavailableView("No Files", systemImage: "tray")
@@ -149,7 +193,7 @@ struct BrowserView: View {
                         }
                         .pickerStyle(.inline)
                         Divider()
-                        if visibleItems.contains(where: { $0.kind == .folder || $0.kind == .file }) {
+                        if shownItems.contains(where: { $0.kind == .folder || $0.kind == .file }) {
                             Button("Select", systemImage: "checkmark.circle") { selection = [] }
                         }
                         if !isRoot {
@@ -246,11 +290,45 @@ struct BrowserView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { reload() }
         }
-        .onChange(of: sortOrder) { items = items.sorted(by: sortOrder) }
+        .onChange(of: sortOrder) {
+            items = items.sorted(by: sortOrder)
+            deepResults = deepResults.sorted(by: sortOrder)
+        }
         .onChange(of: servers.servers) { if isRoot { reload() } }
         .onChange(of: bookmarks.bookmarks) { if isRoot { reload() } }
         .onChange(of: transfers.completed) { if isLocal { reload() } }
-        .onDisappear { loadTask?.cancel() }
+        .onDisappear {
+            loadTask?.cancel()
+            searchTask?.cancel()
+        }
+    }
+
+    /// Starts over looking through the subfolders, or stops when that is not asked for.
+    private func searchSubfolders() {
+        searchTask?.cancel()
+        deepResults = []
+        deepListings = [:]
+        let query = query
+        guard !query.isEmpty, searchScope == .subfolders else {
+            isSearchingDeep = false
+            return
+        }
+        isSearchingDeep = true
+        let search = FolderSearch(source: source, query: query)
+        searchTask = Task {
+            // Not for every keystroke: a server is asked folder by folder.
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await search.run(from: directory) { step in
+                guard !Task.isCancelled else { return }
+                deepListings[PlaybackQueue.folderKey(step.folder)] = step.listing
+                if !step.matches.isEmpty {
+                    deepResults = (deepResults + step.matches).sorted(by: sortOrder)
+                }
+            }
+            guard !Task.isCancelled else { return }
+            isSearchingDeep = false
+        }
     }
 
     private func reload() {
@@ -267,6 +345,10 @@ struct BrowserView: View {
                 guard !Task.isCancelled else { return }
                 items = loaded.sorted(by: sortOrder)
                 failure = nil
+                // What a search found may be what was just renamed, moved or deleted.
+                if searchScope == .subfolders, !query.isEmpty {
+                    searchSubfolders()
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 items = []
@@ -291,8 +373,14 @@ struct BrowserView: View {
         } else if item.isDirectory {
             path.append(item)
         } else if item.mediaKind.isPlayable {
-            var target = PlaybackTarget(item: item, siblings: items)
-            target.queue = PlaybackQueue(startingAt: item, among: items)
+            // Previous and next lead through what is listed: the folder, or the results.
+            let queue = query.isEmpty
+                ? PlaybackQueue(startingAt: item, among: items)
+                : PlaybackQueue(startingAt: item, among: shownItems, listings: searchScope == .subfolders ? deepListings : [
+                    PlaybackQueue.folderKey(directory): items,
+                ])
+            var target = PlaybackTarget(item: item, siblings: queue.siblings(of: item))
+            target.queue = queue
             playing = target
         }
     }

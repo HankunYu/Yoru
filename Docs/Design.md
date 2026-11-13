@@ -441,3 +441,14 @@ speed, A-B loop).
 - Volume normalization (`normalize-volume` in `yoru.conf`, a labeled `dynaudnorm` filter).
 - A pinch switches between fit and fill; it no longer zooms.
 - Settings is in the toolbar of every folder.
+
+## Search
+
+- Each folder has a search bar. Typing filters the folder shown; the scope "Subfolders"
+  walks everything below it (`FolderSearch`, breadth first, one listing at a time,
+  cancelled when the text or scope changes, at most 3000 folders).
+- A query is its words, all of which must be in the name; case, width and accents aside.
+- Results from below carry their path (`BrowserItem.context`), shown in the detail line.
+- Previous and next lead through the results. Each result's subtitles are still looked
+  for in its own folder: the walk keeps every listing it made (`PlaybackQueue.listings`).
+- At the root, "Subfolders" covers local files only; a server is searched from inside it.

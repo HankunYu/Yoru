@@ -18,6 +18,8 @@ struct BrowserItem: Identifiable, Hashable {
     let modified: Date?
     /// Set for a bookmark: which one.
     var bookmarkID: UUID?
+    /// Set for a search result from a folder below the one searched: the path to it.
+    var context: String?
 
     var id: URL { url }
     var isDirectory: Bool { kind != .file }

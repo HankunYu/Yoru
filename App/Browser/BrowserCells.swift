@@ -79,6 +79,11 @@ private struct FileCell: View {
 
     private var detail: String {
         var parts: [String] = []
+        // A search result from further down says where: the whole way in a row, the
+        // folder it is in on a tile, which has no room for more.
+        if let context = item.context {
+            parts.append(mode == .list ? context : (context as NSString).lastPathComponent)
+        }
         if mode == .list, let duration = preview?.info.durationLabel {
             parts.append(duration)
         }
@@ -129,7 +134,10 @@ private struct FolderCell: View {
         BrowserCellLayout(mode: mode, title: item.title) {
             FolderCover(covers: covers, cornerRadius: mode.coverCornerRadius)
         } detail: {
-            if let peek {
+            if let context = item.context {
+                Text(mode == .list ? context : (context as NSString).lastPathComponent)
+                    .lineLimit(1)
+            } else if let peek {
                 Text("\(peek.count) items")
                     .lineLimit(1)
             }
