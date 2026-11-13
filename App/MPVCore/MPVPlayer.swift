@@ -131,6 +131,75 @@ final class MPVPlayer: @unchecked Sendable {
         }
     }
 
+    /// Queues a write of a structured value (a list or a map). Failures are logged when
+    /// mpv replies.
+    func setProperty(_ name: String, node value: MPVValue) {
+        _ = withHandle { handle in
+            var allocations: [UnsafeMutableRawPointer] = []
+            defer { allocations.forEach { $0.deallocate() } }
+            var node = Self.node(for: value, allocations: &allocations)
+            // libmpv copies the value before returning.
+            return report(mpv_set_property_async(handle, 0, name, MPV_FORMAT_NODE, &node), "set \(name)")
+        }
+    }
+
+    /// Lays `value` out as libmpv's node tree. Everything it points at is added to
+    /// `allocations`, which the caller frees once libmpv has taken its copy.
+    static func node(for value: MPVValue, allocations: inout [UnsafeMutableRawPointer]) -> mpv_node {
+        func string(_ text: String) -> UnsafeMutablePointer<CChar> {
+            let bytes = Array(text.utf8CString)
+            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
+            pointer.initialize(from: bytes, count: bytes.count)
+            allocations.append(UnsafeMutableRawPointer(pointer))
+            return pointer
+        }
+        func list(_ values: [MPVValue], keys: [String]?) -> UnsafeMutablePointer<mpv_node_list> {
+            let list = UnsafeMutablePointer<mpv_node_list>.allocate(capacity: 1)
+            allocations.append(UnsafeMutableRawPointer(list))
+            let nodes = UnsafeMutablePointer<mpv_node>.allocate(capacity: max(values.count, 1))
+            allocations.append(UnsafeMutableRawPointer(nodes))
+            for (index, value) in values.enumerated() {
+                nodes[index] = node(for: value, allocations: &allocations)
+            }
+            var keyPointers: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+            if let keys {
+                let pointers = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: max(keys.count, 1))
+                allocations.append(UnsafeMutableRawPointer(pointers))
+                for (index, key) in keys.enumerated() {
+                    pointers[index] = string(key)
+                }
+                keyPointers = pointers
+            }
+            list.initialize(to: mpv_node_list(num: Int32(values.count), values: nodes, keys: keyPointers))
+            return list
+        }
+        var result = mpv_node()
+        switch value {
+        case .none:
+            result.format = MPV_FORMAT_NONE
+        case .flag(let flag):
+            result.format = MPV_FORMAT_FLAG
+            result.u.flag = flag ? 1 : 0
+        case .int(let number):
+            result.format = MPV_FORMAT_INT64
+            result.u.int64 = number
+        case .double(let number):
+            result.format = MPV_FORMAT_DOUBLE
+            result.u.double_ = number
+        case .string(let text):
+            result.format = MPV_FORMAT_STRING
+            result.u.string = string(text)
+        case .array(let values):
+            result.format = MPV_FORMAT_NODE_ARRAY
+            result.u.list = list(values, keys: nil)
+        case .map(let map):
+            let keys = map.keys.sorted()
+            result.format = MPV_FORMAT_NODE_MAP
+            result.u.list = list(keys.map { map[$0]! }, keys: keys)
+        }
+        return result
+    }
+
     func observe(_ name: String, format: MPVFormat) {
         _ = withHandle { handle in
             report(mpv_observe_property(handle, 0, name, format.raw), "observe \(name)")
