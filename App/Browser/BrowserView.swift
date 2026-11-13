@@ -120,12 +120,10 @@ struct BrowserView: View {
         .navigationTitle(title)
         .toolbar {
             // Settings sits in its own glass group, apart from the browsing actions.
-            if isRoot {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Settings", systemImage: "gearshape") { isShowingSettings = true }
-                }
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Settings", systemImage: "gearshape") { isShowingSettings = true }
             }
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
             if selection != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { selection = nil }
