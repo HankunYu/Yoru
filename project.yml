@@ -30,8 +30,13 @@ targets:
       - path: App
         excludes:
           - Resources/DefaultConfig
+          - Resources/Shaders
       # Shipped as a folder so it can be copied verbatim into Documents/mpv on first launch.
       - path: App/Resources/DefaultConfig
+        type: folder
+        buildPhase: resources
+      # The built-in shaders, shipped as a folder mpv reads them from.
+      - path: App/Resources/Shaders
         type: folder
         buildPhase: resources
     dependencies:

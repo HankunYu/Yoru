@@ -7,7 +7,7 @@ import Foundation
 enum ConfigDirectory {
     static let url = URL.documentsDirectory.appending(path: "mpv", directoryHint: .isDirectory)
 
-    private static let subdirectories = ["scripts", "script-opts", "fonts", "watch_later"]
+    private static let subdirectories = ["scripts", "script-opts", "fonts", "watch_later", "shaders"]
     // The bundled CJK font lives in `fonts/` like any user font: iOS sandboxing keeps libass
     // from opening system fonts (PingFang etc.), so without it CJK subtitles have no glyphs.
     private static let defaultFiles = [

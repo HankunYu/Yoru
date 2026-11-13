@@ -33,6 +33,13 @@ struct YoruOptions: Equatable {
     var remoteThumbnails = true
     /// Even out loud and quiet passages while playing.
     var normalizesVolume = false
+    /// The shaders of `ShaderLibrary` in use, in the order they are applied: the order
+    /// they were switched on, which is how a set made of several files is put together.
+    var shaders: [String] = []
+    /// The group those shaders were switched on as, if they were; its file name.
+    var shaderGroup: String?
+    /// The color lookup table in use, if any.
+    var colorTable: String?
     /// Offer the diagnostics overlay (layer, display and fold state) in the player's menu.
     var diagnostics = false
 
@@ -68,6 +75,16 @@ struct YoruOptions: Equatable {
         if let value = file.value(for: "normalize-volume") {
             options.normalizesVolume = value == "yes"
         }
+        // File names may hold commas; a slash they cannot.
+        if let value = file.value(for: "shaders") {
+            options.shaders = value.split(separator: "/").map(String.init)
+        }
+        if let value = file.value(for: "shader-group"), !value.isEmpty {
+            options.shaderGroup = value
+        }
+        if let value = file.value(for: "color-table"), !value.isEmpty {
+            options.colorTable = value
+        }
         if let value = file.value(for: "diagnostics") {
             options.diagnostics = value == "yes"
         }
@@ -89,6 +106,9 @@ struct YoruOptions: Equatable {
         file.set("at-end", to: endAction.rawValue)
         file.set("remote-thumbnails", to: Self.flag(remoteThumbnails))
         file.set("normalize-volume", to: Self.flag(normalizesVolume))
+        file.set("shaders", to: shaders.joined(separator: "/"))
+        file.set("shader-group", to: shaderGroup ?? "")
+        file.set("color-table", to: colorTable ?? "")
         file.set("diagnostics", to: Self.flag(diagnostics))
         file.save()
     }

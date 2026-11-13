@@ -481,3 +481,12 @@ speed, A-B loop).
 - **Subtitles**: files beside `BDMV` named after the disc folder (`Film/Film.chs.ass`),
   loaded for features only.
 - **Frames**: each title is pictured by its longest clip, made as its row comes into view.
+
+## Shaders
+
+- **What they are**: `.glsl` files in mpv's hook format, `.cube` color tables, and `.group` files, text listing shader names, so several are switched as one (an Anime4K mode is half a dozen files). `ShaderLibrary` is the one place that knows where they are.
+- **Two sources**: `Documents/mpv/shaders` holds the user's; `App/Resources/Shaders` ships built-in ones in the app bundle, read-only and replaced by updates. A file in the user's folder stands in for a built-in shader of the same name: editing a built-in one writes that file, and "Restore Original" removes it. Built-in ones are not copied to Documents on first launch, as the default config is, because then an update could not improve them.
+- **Built-in shaders** are creative looks, written for the app: CRT television, VHS tape, handheld console. Their titles are translated (keys added by hand, `extractionState: manual`); the user's shaders show their file names. They hook `OUTPUT` and size their features in screen pixels or as counts down the picture, never in source pixels: on a dense phone screen a scanline a few pixels high cannot be seen. They are tuned for SDR.
+- **In the player** (Adjustments > Picture): groups as exclusive switches, single shaders in the order they were switched on, a color table picker. The selection is kept in `yoru.conf` (`shaders`, `shader-group`, `color-table`). A group that is on is read again at each attach, so editing it changes what plays.
+- **In Settings > Shaders**: groups (reorder, rename, duplicate), built-in and imported shaders, import. A shader's page lists its `#define NAME number // comment` lines as editable values (`ShaderSource`), edits the source, and runs `ShaderCheck`: a second of bundled video through an off-screen gpu-next with only that shader on, showing what the renderer objected to, since mpv otherwise drops a broken shader silently.
+- **Tests** check every built-in shader compiles (`ShaderCheckTests`).

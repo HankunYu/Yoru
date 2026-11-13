@@ -58,6 +58,7 @@ struct SettingsView: View {
         case .audio: AudioSettings(player: $player)
         case .subtitles: SubtitleSettings(player: $player)
         case .gestures: GestureSettings(interface: $interface)
+        case .shaders: ShaderSettings()
         case .storage: StorageSettings(player: $player, interface: $interface)
         }
     }
@@ -109,6 +110,7 @@ private enum SettingsCategory: CaseIterable, Identifiable {
     case audio
     case subtitles
     case gestures
+    case shaders
     case storage
 
     var id: Self { self }
@@ -120,6 +122,7 @@ private enum SettingsCategory: CaseIterable, Identifiable {
         case .audio: "Audio"
         case .subtitles: "Subtitles"
         case .gestures: "Gestures"
+        case .shaders: "Shaders"
         case .storage: "Cache & Storage"
         }
     }
@@ -131,6 +134,7 @@ private enum SettingsCategory: CaseIterable, Identifiable {
         case .audio: "Preferred audio language."
         case .subtitles: "Language, size, position and font."
         case .gestures: "Double tap, brightness, volume and seeking."
+        case .shaders: "Picture shaders, groups of them and color tables."
         case .storage: "Read-ahead buffer and thumbnails."
         }
     }
@@ -142,6 +146,7 @@ private enum SettingsCategory: CaseIterable, Identifiable {
         case .audio: "waveform"
         case .subtitles: "captions.bubble"
         case .gestures: "hand.tap"
+        case .shaders: "wand.and.stars"
         case .storage: "internaldrive"
         }
     }

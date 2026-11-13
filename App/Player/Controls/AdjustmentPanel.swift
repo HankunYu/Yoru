@@ -328,6 +328,128 @@ private struct PictureAdjustments: View {
         .buttonStyle(PanelButtonStyle())
         Toggle("Debanding", isOn: model.binding(.deband))
             .tint(Theme.accent)
+        ShaderAdjustments(model: model)
+    }
+}
+
+/// The user's own shaders and color tables, from the config directory's shaders folder.
+private struct ShaderAdjustments: View {
+    let model: PlayerModel
+    @State private var showsSingleShaders = false
+    @State private var isNamingGroup = false
+    @State private var groupName = ""
+
+    private var library: ShaderLibrary { model.shaderLibrary }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Shaders")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if library.isEmpty {
+                Text("Copy .glsl shaders or .cube color tables into the mpv/shaders folder with the Files app, and they are listed here.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            // A group naming nothing that is here has nothing to switch.
+            ForEach(library.groups.filter { !library.existing($0.shaders).isEmpty }) { group in
+                Toggle(isOn: Binding(
+                    get: { model.activeGroup == group.file },
+                    set: { model.setShaderGroup(group, isOn: $0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: group.title)
+                            .lineLimit(2)
+                        let missing = library.missingCount(in: group)
+                        if missing > 0 {
+                            Text("\(missing) files missing")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .tint(Theme.accent)
+                .contextMenu {
+                    Button("Delete Group", systemImage: "trash", role: .destructive) { model.deleteShaderGroup(group) }
+                }
+            }
+            if !library.shaders.isEmpty {
+                // With groups to switch, the single files are for making new ones.
+                if library.groups.isEmpty {
+                    singleShaders
+                } else {
+                    Button {
+                        showsSingleShaders.toggle()
+                    } label: {
+                        HStack {
+                            Text("Single Shaders")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .rotationEffect(.degrees(showsSingleShaders ? 90 : 0))
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if showsSingleShaders {
+                        singleShaders
+                    }
+                }
+            }
+            // A selection made by hand can be kept as a group.
+            if model.activeGroup == nil, model.activeShaders.count > 1 {
+                Button("Save as Group") {
+                    groupName = ""
+                    isNamingGroup = true
+                }
+                .buttonStyle(PanelButtonStyle())
+            }
+            if !library.tables.isEmpty {
+                Row(title: "Color Table") {
+                    Picker("Color Table", selection: Binding(get: { model.colorTable }, set: model.setColorTable)) {
+                        Text("None").tag(String?.none)
+                        ForEach(library.tables, id: \.self) { table in
+                            Text(verbatim: ShaderLibrary.title(of: table)).tag(String?.some(table))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.white)
+                }
+            }
+        }
+        .padding(.top, 6)
+        .animation(.snappy(duration: 0.2), value: showsSingleShaders)
+        .onAppear { model.refreshShaderLibrary() }
+        .alert("Save as Group", isPresented: $isNamingGroup) {
+            TextField("Name", text: $groupName)
+            Button("Save") { model.saveShadersAsGroup(named: groupName) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The shaders that are on, in their order, become one switch.")
+        }
+    }
+
+    @ViewBuilder private var singleShaders: some View {
+        ForEach(library.shaders, id: \.self) { shader in
+            Toggle(isOn: Binding(
+                get: { model.activeShaders.contains(shader) },
+                set: { model.setShader(shader, isOn: $0) }
+            )) {
+                HStack(spacing: 8) {
+                    // Shaders apply in the order they were switched on.
+                    if let index = model.activeShaders.firstIndex(of: shader), model.activeShaders.count > 1 {
+                        Text(verbatim: "\(index + 1)")
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.black)
+                            .frame(width: 18, height: 18)
+                            .background(Theme.accent, in: .circle)
+                    }
+                    Text(verbatim: ShaderLibrary.title(of: shader))
+                        .lineLimit(2)
+                }
+            }
+            .tint(Theme.accent)
+        }
     }
 }
 

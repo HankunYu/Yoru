@@ -38,7 +38,36 @@ enum ConfigFile: String, CaseIterable, Identifiable {
 struct ConfigFileEditor: View {
     let file: ConfigFile
 
-    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        PlainTextEditor(
+            title: file.title,
+            load: { (try? String(contentsOf: file.url, encoding: .utf8)) ?? "" },
+            save: { try $0.write(to: file.url, atomically: true, encoding: .utf8) },
+            restore: .init(
+                title: "Restore Default",
+                prompt: "Replace \(file.title) with YORU's default?",
+                contents: { ConfigDirectory.defaultContents(of: file.rawValue) ?? "" }
+            )
+        )
+    }
+}
+
+/// A plain-text editor for a file: monospaced, saved on request, with an optional way
+/// back to some earlier text.
+struct PlainTextEditor: View {
+    struct Restore {
+        let title: LocalizedStringKey
+        let prompt: LocalizedStringKey
+        /// The text to go back to. It replaces what is in the editor; nothing is written
+        /// until the user saves.
+        let contents: () -> String
+    }
+
+    let title: String
+    let load: () -> String
+    let save: (String) throws -> Void
+    var restore: Restore?
+
     @State private var text = ""
     @State private var savedText = ""
     @State private var isConfirmingRestore = false
@@ -54,26 +83,28 @@ struct ConfigFileEditor: View {
             .scrollContentBackground(.hidden)
             .padding(.horizontal, 12)
             .background(Theme.background)
-            .navigationTitle(file.title)
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save)
+                    Button("Save", action: write)
                         .disabled(!hasChanges)
                 }
-                ToolbarItem(placement: .secondaryAction) {
-                    Button("Restore Default", systemImage: "arrow.uturn.backward") {
-                        isConfirmingRestore = true
+                if let restore {
+                    ToolbarItem(placement: .secondaryAction) {
+                        Button(restore.title, systemImage: "arrow.uturn.backward") {
+                            isConfirmingRestore = true
+                        }
                     }
                 }
             }
             .confirmationDialog(
-                "Replace \(file.title) with YORU's default?",
+                restore?.prompt ?? "",
                 isPresented: $isConfirmingRestore,
                 titleVisibility: .visible
             ) {
-                Button("Restore Default", role: .destructive) {
-                    text = ConfigDirectory.defaultContents(of: file.rawValue) ?? ""
+                Button(restore?.title ?? "", role: .destructive) {
+                    text = restore?.contents() ?? text
                 }
             } message: {
                 Text("Nothing is written until you save.")
@@ -86,17 +117,15 @@ struct ConfigFileEditor: View {
             } message: {
                 Text(errorMessage ?? "")
             }
-            .onAppear(perform: load)
+            .onAppear {
+                text = load()
+                savedText = text
+            }
     }
 
-    private func load() {
-        text = (try? String(contentsOf: file.url, encoding: .utf8)) ?? ""
-        savedText = text
-    }
-
-    private func save() {
+    private func write() {
         do {
-            try text.write(to: file.url, atomically: true, encoding: .utf8)
+            try save(text)
             savedText = text
         } catch {
             errorMessage = error.localizedDescription

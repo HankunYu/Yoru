@@ -22,12 +22,15 @@ enum PlaybackMemory {
         return frame * Int64(framesHeld)
     }
 
-    static func fits(width: Int, height: Int, pixelFormat: String?, limit: Int64) -> Bool {
-        Double(bytesNeeded(width: width, height: height, pixelFormat: pixelFormat)) <= Double(limit) * usableShare
+    static func fits(width: Int, height: Int, pixelFormat: String?, limit: Int64?) -> Bool {
+        // Nothing to hold the video against: let it play.
+        guard let limit else { return true }
+        return Double(bytesNeeded(width: width, height: height, pixelFormat: pixelFormat)) <= Double(limit) * usableShare
     }
 
-    /// The most memory the system lets this app use: what it uses now and what it may still take.
-    static var limit: Int64 {
+    /// The most memory the system lets this app use: what it uses now and what it may
+    /// still take. Nil where the system does not say, as in the simulator.
+    static var limit: Int64? {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
         let result = withUnsafeMutablePointer(to: &info) {
@@ -35,7 +38,8 @@ enum PlaybackMemory {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
-        let footprint = result == KERN_SUCCESS ? Int64(info.phys_footprint) : 0
-        return footprint + Int64(os_proc_available_memory())
+        let available = Int64(os_proc_available_memory())
+        guard result == KERN_SUCCESS, available > 0 else { return nil }
+        return Int64(info.phys_footprint) + available
     }
 }

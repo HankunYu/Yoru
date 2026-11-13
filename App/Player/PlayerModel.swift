@@ -266,6 +266,12 @@ final class PlayerModel {
     private var player: MPVPlayer?
     private let options = YoruOptions.load()
     private(set) var normalizesVolume = false
+    /// What the shaders folder holds, and what of it is in use.
+    private(set) var shaderLibrary = ShaderLibrary(names: [])
+    private(set) var activeShaders: [String] = []
+    /// The group the active shaders were switched on as; nil for a selection made by hand.
+    private(set) var activeGroup: String?
+    private(set) var colorTable: String?
     /// The audio filter behind `normalizesVolume`. Labeled, so it is added to and taken
     /// from whatever `af` the user's mpv.conf sets without disturbing it.
     private static let normalizeFilter = "@yoru-normalize:dynaudnorm=g=5:f=250:r=0.9:p=0.5"
@@ -326,7 +332,90 @@ final class PlayerModel {
             normalizesVolume = true
             player.command("af", "add", Self.normalizeFilter)
         }
+        shaderLibrary = ShaderLibrary.load()
+        // A group that is on decides the shaders, as it reads now: it may have been
+        // edited since. Without one, the selection made by hand.
+        if let group = shaderLibrary.groups.first(where: { $0.file == options.shaderGroup }) {
+            activeGroup = group.file
+            activeShaders = shaderLibrary.existing(group.shaders)
+        } else {
+            activeShaders = shaderLibrary.existing(options.shaders)
+        }
+        // Appended one by one, after whatever mpv.conf may have set itself.
+        for shader in activeShaders {
+            player.command("change-list", "glsl-shaders", "append", ShaderLibrary.path(of: shader))
+        }
+        if let table = options.colorTable, shaderLibrary.tables.contains(table) {
+            colorTable = table
+            player.setProperty("lut", ShaderLibrary.path(of: table))
+        }
         scheduleControlsHide()
+    }
+
+    /// Looks into the shaders folder again: files may have been added while the app ran.
+    func refreshShaderLibrary() {
+        shaderLibrary = ShaderLibrary.load()
+    }
+
+    /// Switches a shader of the library on or off. One switched on goes last. Remembered.
+    func setShader(_ name: String, isOn: Bool) {
+        guard isOn != activeShaders.contains(name) else { return }
+        // Changed by hand, it is no longer the group it was.
+        activeGroup = nil
+        if isOn {
+            activeShaders.append(name)
+            player?.command("change-list", "glsl-shaders", "append", ShaderLibrary.path(of: name))
+        } else {
+            activeShaders.removeAll { $0 == name }
+            player?.command("change-list", "glsl-shaders", "remove", ShaderLibrary.path(of: name))
+        }
+        rememberShaders()
+    }
+
+    /// Switches a group on, in place of whatever shaders are on, or off. Remembered.
+    func setShaderGroup(_ group: ShaderLibrary.Group, isOn: Bool) {
+        for shader in activeShaders {
+            player?.command("change-list", "glsl-shaders", "remove", ShaderLibrary.path(of: shader))
+        }
+        activeShaders = isOn ? shaderLibrary.existing(group.shaders) : []
+        activeGroup = isOn ? group.file : nil
+        for shader in activeShaders {
+            player?.command("change-list", "glsl-shaders", "append", ShaderLibrary.path(of: shader))
+        }
+        rememberShaders()
+    }
+
+    /// Keeps the shaders that are on, in their order, as a group of that name.
+    func saveShadersAsGroup(named name: String) {
+        guard !activeShaders.isEmpty, !name.trimmingCharacters(in: .whitespaces).isEmpty,
+              let file = try? ShaderLibrary.save(activeShaders, asGroupNamed: name) else { return }
+        shaderLibrary = ShaderLibrary.load()
+        activeGroup = file
+        rememberShaders()
+    }
+
+    func deleteShaderGroup(_ group: ShaderLibrary.Group) {
+        ShaderLibrary.deleteGroup(group.file)
+        if activeGroup == group.file {
+            activeGroup = nil
+            rememberShaders()
+        }
+        shaderLibrary = ShaderLibrary.load()
+    }
+
+    /// Uses a color lookup table of the library, or none. Remembered.
+    func setColorTable(_ name: String?) {
+        colorTable = name
+        player?.setProperty("lut", name.map(ShaderLibrary.path(of:)) ?? "")
+        rememberShaders()
+    }
+
+    private func rememberShaders() {
+        var saved = YoruOptions.load()
+        saved.shaders = activeShaders
+        saved.shaderGroup = activeGroup
+        saved.colorTable = colorTable
+        saved.save()
     }
 
     /// Evens out loud and quiet passages. Remembered for later playback.
