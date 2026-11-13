@@ -271,6 +271,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             }
         }
         model.initialSubtitleChoice = target.initialSubtitleChoice
+        model.discLanguages = (target.audioLanguages, target.subtitleLanguages)
+        model.awaitsDiscTrackChoice = target.isOwnPlaylist && !WatchHistory.shared.hasEntry(forLocation: target.location)
         model.beginLoading()
 
         // Given up front rather than added once the file is loaded, so they take part in
@@ -279,10 +281,26 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         for subtitle in target.externalSubtitles {
             player.command("change-list", "sub-files", "append", subtitle)
         }
+        // Options for this file alone. Values are length-prefixed: a title may hold commas.
+        var options: [String] = []
         if target.forcesCache {
-            player.command("loadfile", target.location, "replace", "-1", "cache=yes")
-        } else {
+            options.append("cache=yes")
+        }
+        if target.isOwnPlaylist {
+            options.append("load-unsafe-playlists=yes")
+            // A disc's clips. Some discs carry stream tables with wrong checksums, which
+            // FFmpeg only believes after seeing each a dozen times over; until then it
+            // guesses at the streams, and gives up on PCM audio. The tables come ten
+            // times a second, so this much is read before the streams are settled.
+            options.append("demuxer-lavf-probesize=\(24 << 20)")
+        }
+        if let title = target.title {
+            options.append("force-media-title=%\(title.utf8.count)%\(title)")
+        }
+        if options.isEmpty {
             player.command("loadfile", target.location)
+        } else {
+            player.command("loadfile", target.location, "replace", "-1", options.joined(separator: ","))
         }
     }
 
@@ -369,6 +387,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         switch event {
         case .propertyChanged(name: "vid", let value):
             currentVideoTrack = value.stringValue
+        case .fileLoaded:
+            // A disc title's chapters are in its playlist, where mpv does not look.
+            if !target.chapters.isEmpty {
+                player?.setProperty("chapter-list", node: .array(target.chapters.enumerated().map { index, time in
+                    .map(["title": .string(String(localized: "Chapter \(index + 1)")), "time": .double(time)])
+                }))
+            }
+            model.handle(event)
         case .log(let prefix, let level, let text):
             Log.mpv.info("[\(prefix, privacy: .public)] \(level, privacy: .public): \(text, privacy: .public)")
             #if DEBUG

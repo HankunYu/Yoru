@@ -42,6 +42,10 @@ struct BrowserView: View {
     @State private var deepListings: [String: [BrowserItem]] = [:]
     @State private var isSearchingDeep = false
     @State private var searchTask: Task<Void, Never>?
+    // Set when the folder is a Blu-ray disc: its titles are shown in place of its files.
+    @State private var disc: BlurayDisc?
+    @State private var isReadingDisc = false
+    @State private var showsDiscFiles = false
 
     private struct Relocation: Identifiable {
         enum Purpose {
@@ -66,6 +70,8 @@ struct BrowserView: View {
     private var visibleItems: [BrowserItem] {
         showsMediaOnly ? items.filter { $0.kind != .file || $0.mediaKind == .video || $0.mediaKind == .audio } : items
     }
+    /// Whether the disc's titles stand in for the folder's files right now.
+    private var showsTitles: Bool { disc != nil && !showsDiscFiles && query.isEmpty && selection == nil }
     private var query: SearchQuery { SearchQuery(searchText) }
     /// What the list shows: the folder, or what a search found.
     private var shownItems: [BrowserItem] {
@@ -102,6 +108,17 @@ struct BrowserView: View {
         )
             .ignoresSafeArea()
             .background { BrowserBackground() }
+            .overlay {
+                if let disc, showsTitles {
+                    DiscView(disc: disc) { title in
+                        playing = PlaybackTarget(
+                            title: title, of: disc, label: disc.label(of: title),
+                            subtitles: disc.subtitles(for: title, among: items)
+                        )
+                    }
+                    .background { BrowserBackground() }
+                }
+            }
         .safeAreaInset(edge: .bottom) {
             if selection != nil {
                 selectionBar
@@ -142,7 +159,7 @@ struct BrowserView: View {
                     Button("Retry") { reload() }
                         .buttonStyle(.glass)
                 }
-            } else if isLoading {
+            } else if isLoading || (isReadingDisc && query.isEmpty && !showsDiscFiles) {
                 ProgressView()
             } else if visibleItems.isEmpty, isLocal, items.isEmpty {
                 ContentUnavailableView {
@@ -193,7 +210,13 @@ struct BrowserView: View {
                         }
                         .pickerStyle(.inline)
                         Divider()
-                        if shownItems.contains(where: { $0.kind == .folder || $0.kind == .file }) {
+                        if disc != nil {
+                            Button(
+                                showsDiscFiles ? "Show Titles" : "Show Files",
+                                systemImage: showsDiscFiles ? "opticaldisc" : "folder"
+                            ) { showsDiscFiles.toggle() }
+                        }
+                        if !showsTitles, shownItems.contains(where: { $0.kind == .folder || $0.kind == .file }) {
                             Button("Select", systemImage: "checkmark.circle") { selection = [] }
                         }
                         if !isRoot {
@@ -345,6 +368,15 @@ struct BrowserView: View {
                 guard !Task.isCancelled else { return }
                 items = loaded.sorted(by: sortOrder)
                 failure = nil
+                if BlurayDisc.isDisc(loaded) {
+                    if disc == nil {
+                        isReadingDisc = true
+                        disc = await BlurayDisc.load(from: directory, source: source)
+                        isReadingDisc = false
+                    }
+                } else {
+                    disc = nil
+                }
                 // What a search found may be what was just renamed, moved or deleted.
                 if searchScope == .subfolders, !query.isEmpty {
                     searchSubfolders()

@@ -13,7 +13,7 @@ struct MediaTrack: Identifiable, Equatable {
     let id: Int
     let kind: Kind
     let title: String?
-    let language: String?
+    var language: String?
     let codec: String?
     let isSelected: Bool
     /// Loaded from a separate file; its `title` is then that file's name.
@@ -425,6 +425,50 @@ final class PlayerModel {
             updateSpeedSampling()
         case .videoReconfig, .log, .shutdown:
             break
+        }
+    }
+
+    /// For a disc title: its streams' languages in playlist order, which is the order
+    /// mpv lists the tracks in. Set before the title loads.
+    var discLanguages: (audio: [String], subtitles: [String]) = ([], [])
+    /// Whether the title is new to the user, so the language preferences pick its tracks.
+    var awaitsDiscTrackChoice = false
+
+    /// Gives a disc title's tracks the languages the clips leave out.
+    private func withDiscLanguages(_ tracks: [MediaTrack]) -> [MediaTrack] {
+        guard !discLanguages.audio.isEmpty || !discLanguages.subtitles.isEmpty else { return tracks }
+        var counts: [MediaTrack.Kind: Int] = [:]
+        return tracks.map { track in
+            var track = track
+            let index = counts[track.kind, default: 0]
+            counts[track.kind] = index + 1
+            let languages = track.kind == .audio ? discLanguages.audio : track.kind == .sub ? discLanguages.subtitles : []
+            if track.language == nil, !track.isExternal, index < languages.count {
+                track.language = languages[index]
+            }
+            return track
+        }
+    }
+
+    /// On a first viewing, selects the audio and subtitle the language preferences ask
+    /// for: mpv applies them itself, but before these tracks had a language.
+    private func chooseDiscTracks() {
+        guard awaitsDiscTrackChoice, !tracks.isEmpty else { return }
+        awaitsDiscTrackChoice = false
+        let options = PlayerOptions.load()
+        func preferred(_ kind: MediaTrack.Kind, _ preference: LanguagePreference) -> MediaTrack? {
+            let codes = preference.codes?.lowercased().split(separator: ",").map(String.init) ?? []
+            let candidates = tracks.filter { $0.kind == kind && !$0.isExternal }
+            for code in codes {
+                if let match = candidates.first(where: { $0.language?.lowercased() == code }) { return match }
+            }
+            return nil
+        }
+        if let audio = preferred(.audio, options.audioLanguage), !audio.isSelected {
+            player?.setProperty("aid", String(audio.id))
+        }
+        if let subtitle = preferred(.sub, options.subtitleLanguage), !subtitle.isSelected {
+            player?.setProperty("sid", String(subtitle.id))
         }
     }
 
@@ -848,7 +892,8 @@ final class PlayerModel {
                 OSDMessage(symbol: "plus.magnifyingglass", text: String(format: "%.0f%%", pow(2, zoom) * 100))
             }
         case "track-list":
-            tracks = (value.arrayValue ?? []).compactMap(MediaTrack.init)
+            tracks = withDiscLanguages((value.arrayValue ?? []).compactMap(MediaTrack.init))
+            chooseDiscTracks()
             declineIfTooLarge(value.arrayValue ?? [])
             applyDolbyVisionPolicy(value.arrayValue ?? [])
             chooseInitialSubtitle()

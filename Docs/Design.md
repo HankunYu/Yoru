@@ -452,3 +452,32 @@ speed, A-B loop).
 - Previous and next lead through the results. Each result's subtitles are still looked
   for in its own folder: the walk keeps every listing it made (`PlaybackQueue.listings`).
 - At the root, "Subfolders" covers local files only; a server is searched from inside it.
+
+## Blu-ray folders (BDMV)
+
+- **The app reads the disc.** mpv's `bd://` takes a local path only. A folder holding
+  `BDMV` is shown as its titles (`DiscView`): the playlists in `BDMV/PLAYLIST` are read
+  through the folder's own source (`MediaSource.data(of:)`) and parsed
+  (`BlurayPlaylist`), and a title is played as an inline EDL of its clips, each with its
+  start and length in the clip's own timestamps. So a disc on a server plays like a
+  local one. No menus, no encrypted discs, no ISO images.
+- **Per-file options for a title**: `load-unsafe-playlists=yes`, since mpv keeps an EDL
+  from opening app-served streams (it reports that as "no protocol handler");
+  `demuxer-lavf-probesize` of 24 MB, since some discs carry stream tables with wrong
+  checksums, which FFmpeg accepts only after a dozen sightings and until then guesses,
+  losing PCM audio; `force-media-title`.
+- **Chapters** come from the playlist's marks and are written to mpv's `chapter-list`
+  once the file is loaded (`MPVPlayer.setProperty(_:node:)`); the EDL has `!no_chapters`.
+- **What is offered**: playlists of a minute or more, without those that replay their
+  clips (decoys) and duplicates. Titles at least ten minutes long and 60 % of the longest
+  are features, the rest extras, each in the disc's own order.
+- **Names**: `BDMV/META/DL/bdmt_*.xml` may name the disc and its titles by title number;
+  `BlurayIndex` follows `index.bdmv` and `MovieObject.bdmv` from a number to its
+  playlist where the program plays one outright. Most discs name nothing, and titles are
+  then "Main Feature", "Feature n", "Extra n".
+- **Streams**: the playlist's stream table gives video format, audio codecs and the
+  languages the clips leave out. The row shows them; in the player they are given to
+  mpv's tracks by order, and on a first viewing the language preferences pick among them.
+- **Subtitles**: files beside `BDMV` named after the disc folder (`Film/Film.chs.ass`),
+  loaded for features only.
+- **Frames**: each title is pictured by its longest clip, made as its row comes into view.

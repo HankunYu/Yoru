@@ -52,6 +52,18 @@ struct PlaybackTarget: Identifiable {
     let forcesCache: Bool
     /// The browser item this came from, if it came from the browser.
     let itemURL: URL?
+    /// What to call it, where the location says nothing readable (a disc title).
+    var title: String?
+    /// Chapter starts in seconds, where mpv cannot find them itself (a disc title).
+    var chapters: [Double] = []
+    /// The languages of a disc title's audio and subtitle streams, in the order the
+    /// playlist lists them. The clips do not say, so mpv's tracks come without.
+    var audioLanguages: [String] = []
+    var subtitleLanguages: [String] = []
+    /// Whether the location is a playlist the app wrote itself (a disc title's EDL). mpv
+    /// keeps a playlist from opening streams served by the app, since one found in the
+    /// wild could name anything; this one names only the disc's own clips.
+    var isOwnPlaylist = false
     /// Where previous and next lead; nil for a file opened on its own.
     var queue: PlaybackQueue?
     /// Set on a first viewing with subtitles supplied by the app: how to pick the one to
@@ -110,6 +122,32 @@ struct PlaybackTarget: Identifiable {
             let codes = options.subtitleLanguage.codes?.split(separator: ",").map(String.init) ?? []
             initialSubtitleChoice = InitialSubtitleChoice(codes: codes, stem: item.title)
         }
+    }
+
+    /// A title of a Blu-ray folder: its clips in order, as one video.
+    ///
+    /// - Parameter subtitles: The disc's own subtitle files, if this title is to have them.
+    @MainActor
+    init(title: BlurayDisc.Title, of disc: BlurayDisc, label: String, subtitles: [BrowserItem] = []) {
+        let source = MediaSources.source(for: disc.folder)
+        location = disc.location(of: title, source: source)
+        externalSubtitles = subtitles.map { source.playback(of: $0.url).location }
+        // Whatever the clips' own source needs: an EDL is neither local nor remote to mpv.
+        forcesCache = source.playback(of: disc.folder).forcesCache
+        // As for a file: on a first viewing the language preference picks among them.
+        if subtitles.isEmpty || WatchHistory.shared.hasEntry(forLocation: location) {
+            initialSubtitleChoice = nil
+        } else {
+            let codes = PlayerOptions.load().subtitleLanguage.codes?.split(separator: ",").map(String.init) ?? []
+            initialSubtitleChoice = InitialSubtitleChoice(codes: codes, stem: disc.folder.lastPathComponent)
+        }
+        itemURL = nil
+        securityScopedURL = nil
+        self.title = disc.titles.count > 1 ? "\(disc.name) · \(label)" : disc.name
+        chapters = title.playlist.chapters
+        isOwnPlaylist = true
+        audioLanguages = title.playlist.streams.audio.map(\.language)
+        subtitleLanguages = title.playlist.streams.subtitles.map(\.language)
     }
 
     /// Wraps a file opened in place, claiming security-scoped access for the playback's lifetime.

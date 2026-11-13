@@ -341,7 +341,7 @@ private struct BrowserCellLayout<Cover: View, Detail: View>: View {
 }
 
 /// A 16:9 frame from a file, with an optional resume-progress line and corner badge.
-private struct MediaThumbnail: View {
+struct MediaThumbnail: View {
     let image: UIImage?
     /// Shown when there is no image: the kind's symbol over the file extension.
     let kind: MediaKind
