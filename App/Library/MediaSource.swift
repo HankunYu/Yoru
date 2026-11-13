@@ -6,6 +6,9 @@ import Foundation
 protocol MediaSource: Sendable {
     /// The entries of `directory`, in no particular order.
     func contents(of directory: URL) async throws -> [BrowserItem]
+    /// The whole of a small file, such as a disc's playlist. Refuses files over
+    /// `MediaSources.dataLimit`.
+    func data(of url: URL) async throws -> Data
     var supportsDeletion: Bool { get }
     func delete(_ item: BrowserItem) throws
     /// How mpv opens the item at `url`.
@@ -33,6 +36,9 @@ enum MediaSources {
     }
 
     /// The URL schemes the app serves to mpv itself.
+    /// The largest file `MediaSource.data(of:)` reads.
+    static let dataLimit = 8 << 20
+
     static let streamProtocols: [String: MPVStreamOpener] = [
         MediaServer.Kind.smb.scheme: SMBSource.openStream,
         // Plain smb:// links too. mpv could open them itself, but through the same
@@ -54,6 +60,12 @@ struct LocalSource: MediaSource {
 
     func delete(_ item: BrowserItem) throws {
         try FileManager.default.removeItem(at: item.url)
+    }
+
+    func data(of url: URL) async throws -> Data {
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= MediaSources.dataLimit else { throw CocoaError(.fileReadTooLarge) }
+        return try Data(contentsOf: url)
     }
 
     func playback(of url: URL) -> PlaybackLocation {
@@ -122,6 +134,29 @@ struct SMBSource: MediaSource {
     /// mpv opens the browser URL itself, through `openStream`.
     func playback(of url: URL) -> PlaybackLocation {
         PlaybackLocation(location: url.absoluteString, forcesCache: true)
+    }
+
+    /// Read on the browsing connection: opening one for every small file would cost a
+    /// login each.
+    func data(of url: URL) async throws -> Data {
+        guard let (serverID, path) = MediaServer.parse(url) else { throw SMBError(code: ENOENT) }
+        return try await SMBSession.session(for: serverID).run { connection throws(SMBError) in
+            let file = try connection.openFile(path)
+            defer { connection.close(file) }
+            guard let size = connection.size(of: file), size <= Int64(MediaSources.dataLimit) else {
+                throw SMBError(code: EFBIG)
+            }
+            var data = Data(count: Int(size))
+            var filled = 0
+            while filled < data.count {
+                let read = data.withUnsafeMutableBytes { buffer in
+                    connection.read(file, into: buffer.baseAddress! + filled, count: buffer.count - filled)
+                }
+                guard read > 0 else { throw SMBError(code: EIO) }
+                filled += read
+            }
+            return data
+        }
     }
 
     func transfer(of item: BrowserItem) -> FileTransfer? {
@@ -240,6 +275,13 @@ struct WebDAVSource: MediaSource {
 
     func playback(of url: URL) -> PlaybackLocation {
         PlaybackLocation(location: url.absoluteString, forcesCache: true)
+    }
+
+    func data(of url: URL) async throws -> Data {
+        guard let (serverID, path) = MediaServer.parse(url), let client = WebDAVClient(serverID: serverID) else {
+            throw WebDAVError(reason: .notFound)
+        }
+        return try await client.data(of: path, limit: MediaSources.dataLimit)
     }
 
     /// Opens a file for mpv. Runs on an mpv thread.

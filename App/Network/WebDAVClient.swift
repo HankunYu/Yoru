@@ -100,6 +100,23 @@ struct WebDAVClient: Sendable {
         return WebDAVListing.parse(data).filter { Self.normalized($0.path) != ownPath }.map(\.entry)
     }
 
+    /// The whole of a small file. The range keeps a mistaken request from fetching more
+    /// than `limit`; a server that ignores it is refused by the size of its answer.
+    func data(of path: [String], limit: Int) async throws -> Data {
+        guard let url = url(for: path) else { throw WebDAVError(reason: .invalidAddress) }
+        var request = URLRequest(url: url, timeoutInterval: 15)
+        request.setValue("bytes=0-\(limit)", forHTTPHeaderField: "Range")
+        if let authorization {
+            request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status), data.count <= limit else {
+            throw WebDAVError(reason: status == 401 || status == 403 ? .unauthorized : .status(status))
+        }
+        return data
+    }
+
     /// Downloads the file at `path` to `destination`, reporting bytes written so far.
     func download(_ path: [String], to destination: URL, progress: @Sendable (Int64) -> Void) async throws {
         guard let url = url(for: path) else { throw WebDAVError(reason: .invalidAddress) }

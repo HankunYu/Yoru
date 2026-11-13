@@ -22,6 +22,7 @@ private struct FakeSource: MediaSource {
     }
 
     func contents(of directory: URL) async throws -> [BrowserItem] { tree[directory] ?? [] }
+    func data(of url: URL) async throws -> Data { throw CocoaError(.fileNoSuchFile) }
     func delete(_ item: BrowserItem) throws {}
     func playback(of url: URL) -> PlaybackLocation { PlaybackLocation(location: url.absoluteString) }
     func transfer(of item: BrowserItem) -> FileTransfer? { nil }
