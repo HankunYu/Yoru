@@ -6057,6 +6057,90 @@
           }
         }
       }
+    },
+    "Normalize Volume": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音量标准化"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音量標準化"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音量を均一化"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "음량 평준화"
+          }
+        }
+      }
+    },
+    "Evens out loud and quiet passages, so speech stays audible without effects being loud. Stays on for other videos.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拉平响的和轻的段落，让对白听得清而音效不至于太响。对其他视频同样生效。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拉平大聲和小聲的段落，讓對白聽得清楚而音效不至於太大聲。對其他影片同樣生效。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大きい音と小さい音の差をならし、効果音を抑えつつセリフを聞き取りやすくします。ほかのビデオにも適用されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "큰 소리와 작은 소리의 차이를 줄여, 효과음은 억제하고 대사는 잘 들리게 합니다. 다른 비디오에도 적용됩니다."
+          }
+        }
+      }
+    },
+    "This video's resolution needs more memory than this device can give, so it can't be played (´；ω；`)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此视频的分辨率超出了本设备可用的内存，无法播放 (´；ω；`)"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此影片的解析度超出了本裝置可用的記憶體，無法播放 (´；ω；`)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このビデオの解像度はこのデバイスで使えるメモリを超えているため、再生できません (´；ω；`)"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 비디오의 해상도는 이 기기에서 사용할 수 있는 메모리를 초과하여 재생할 수 없습니다 (´；ω；`)"
+          }
+        }
+      }
     }
   }
 }

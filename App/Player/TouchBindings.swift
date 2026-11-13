@@ -18,8 +18,10 @@ enum TouchBindings {
         var bindings = [
             "GESTURE_TAP script-message yoru toggle-controls",
             "GESTURE_DOUBLE_TAP_CENTER cycle pause",
-            "GESTURE_PINCH_OUT no-osd add video-zoom 0.04",
-            "GESTURE_PINCH_IN no-osd add video-zoom -0.04",
+            // Spreading fills the screen, pinching shows the whole picture again. The keys
+            // repeat per step of the pinch, which setting a value does not mind.
+            "GESTURE_PINCH_OUT no-osd set panscan 1",
+            "GESTURE_PINCH_IN no-osd set panscan 0",
             "GESTURE_HOLD script-message yoru hold-speed \(String(format: "%g", options.holdSpeed))",
         ]
 

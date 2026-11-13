@@ -265,6 +265,10 @@ final class PlayerModel {
 
     private var player: MPVPlayer?
     private let options = YoruOptions.load()
+    private(set) var normalizesVolume = false
+    /// The audio filter behind `normalizesVolume`. Labeled, so it is added to and taken
+    /// from whatever `af` the user's mpv.conf sets without disturbing it.
+    private static let normalizeFilter = "@yoru-normalize:dynaudnorm=g=5:f=250:r=0.9:p=0.5"
     private var isScrubbing = false
     private var seekInFlight = false
     private var pendingSeek: (target: Double, exact: Bool)?
@@ -318,12 +322,34 @@ final class PlayerModel {
         for name in Self.diagnosticProperties + Self.infoProperties {
             player.observe(name, format: .string)
         }
+        if options.normalizesVolume {
+            normalizesVolume = true
+            player.command("af", "add", Self.normalizeFilter)
+        }
         scheduleControlsHide()
+    }
+
+    /// Evens out loud and quiet passages. Remembered for later playback.
+    func setNormalizesVolume(_ isOn: Bool) {
+        guard isOn != normalizesVolume else { return }
+        normalizesVolume = isOn
+        if isOn {
+            player?.command("af", "add", Self.normalizeFilter)
+        } else {
+            player?.command("af", "remove", "@yoru-normalize")
+        }
+        // Read again rather than saved from `options`: Settings may have changed the
+        // file since this player opened.
+        var saved = YoruOptions.load()
+        saved.normalizesVolume = isOn
+        saved.save()
     }
 
     /// Called when a file starts opening.
     func beginLoading() {
         isLoading = true
+        // What was said about the previous file does not apply to this one.
+        errorMessage = nil
         updateSpeedSampling()
     }
 
@@ -400,6 +426,40 @@ final class PlayerModel {
         case .videoReconfig, .log, .shutdown:
             break
         }
+    }
+
+    /// Whether the filter that sets Dolby Vision aside is in place.
+    private var ignoresDolbyVision = false
+
+    /// Plays Dolby Vision by its base layer wherever it has one. Profiles 7 and 8 carry a
+    /// picture that is complete without the enhancement: HDR10, or HLG in what iPhones
+    /// record. mpv's processing of the latter comes out overexposed, and the base layer
+    /// alone is what every other player shows. Profile 5 has no such picture and keeps
+    /// the processing it cannot do without.
+    private func applyDolbyVisionPolicy(_ tracks: [MPVValue]) {
+        let video = tracks.first { $0["type"]?.stringValue == "video" && $0["selected"]?.flagValue == true }
+        let profile = video?["dolby-vision-profile"]?.intValue
+        let ignores = profile != nil && profile != 5
+        guard ignores != ignoresDolbyVision else { return }
+        ignoresDolbyVision = ignores
+        if ignores {
+            player?.command("vf", "add", "@yoru-dolby-vision:format=dolbyvision=no")
+        } else {
+            player?.command("vf", "remove", "@yoru-dolby-vision")
+        }
+    }
+
+    /// Stops a video that would take more memory than the app is allowed, before its
+    /// decoder has filled up; see `PlaybackMemory`. Stills are a single frame.
+    private func declineIfTooLarge(_ tracks: [MPVValue]) {
+        guard let video = tracks.first(where: {
+            $0["type"]?.stringValue == "video" && $0["selected"]?.flagValue == true && $0["image"]?.flagValue != true
+        }), let width = video["demux-w"]?.intValue, let height = video["demux-h"]?.intValue else { return }
+        let format = video["format-name"]?.stringValue
+        guard !PlaybackMemory.fits(width: width, height: height, pixelFormat: format, limit: PlaybackMemory.limit) else { return }
+        player?.command("stop")
+        isLoading = false
+        report(error: String(localized: "This video's resolution needs more memory than this device can give, so it can't be played (´；ω；`)"))
     }
 
     private func chooseInitialSubtitle() {
@@ -789,6 +849,8 @@ final class PlayerModel {
             }
         case "track-list":
             tracks = (value.arrayValue ?? []).compactMap(MediaTrack.init)
+            declineIfTooLarge(value.arrayValue ?? [])
+            applyDolbyVisionPolicy(value.arrayValue ?? [])
             chooseInitialSubtitle()
         case "secondary-sid":
             secondarySubtitleID = value.stringValue.flatMap(Int.init)
@@ -806,7 +868,16 @@ final class PlayerModel {
             currentChapter = value.intValue.flatMap { $0 >= 0 ? $0 : nil }
         default:
             if let number = PlayerNumber(rawValue: name) {
+                let previous = numbers[number]
                 numbers[number] = value.doubleValue
+                // Fit and fill are switched by a pinch, which shows no control to confirm it.
+                if number == .panscan, let panscan = value.doubleValue, panscan != previous {
+                    announce(name) {
+                        panscan > 0
+                            ? OSDMessage(symbol: "arrow.up.left.and.arrow.down.right", text: String(localized: "Fill"))
+                            : OSDMessage(symbol: "arrow.down.right.and.arrow.up.left", text: String(localized: "Fit"))
+                    }
+                }
             } else if let flag = PlayerFlag(rawValue: name) {
                 flags[flag] = value.flagValue
             } else if let text = PlayerText(rawValue: name) {

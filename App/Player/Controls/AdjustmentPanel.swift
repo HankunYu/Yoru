@@ -271,6 +271,15 @@ private struct AudioAdjustments: View {
             .font(.caption)
             .foregroundStyle(.white.opacity(0.6))
             .frame(maxWidth: .infinity, alignment: .leading)
+        Toggle("Normalize Volume", isOn: Binding(
+            get: { model.normalizesVolume },
+            set: model.setNormalizesVolume
+        ))
+        .tint(Theme.accent)
+        Text("Evens out loud and quiet passages, so speech stays audible without effects being loud. Stays on for other videos.")
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.6))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

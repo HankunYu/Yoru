@@ -402,3 +402,42 @@ speed, A-B loop).
   at launch and every 64 writes.
 - **Home** in the browser: local subfolders go back to the root, server folders to the
   server's top. Open Location is offered at the root only.
+
+## HDR output on iOS
+
+- **The layer asks for HDR itself.** MoltenVK only gives `MetalLayer` the color space of
+  the surface mpv chose; mpv's code that turns EDR on exists for macOS alone. `MetalLayer`
+  watches its `colorspace` and, for an HDR one, sets `wantsExtendedDynamicRangeContent`,
+  `preferredDynamicRange = .high` and `contentsHeadroom` (the request since iOS 26).
+  Without it the picture is clipped at SDR white unless another app has the display in HDR.
+- **The system fits the highlights.** The layer carries `CAEDRMetadata` (HDR10 with a peak
+  of 1000 nits and white at 100, or HLG), so the system maps to what the display can show
+  at its current brightness. mpv renders to the same peak (`target-peak`, set while the
+  output is HDR): left on auto it takes PQ output to reach 10 000 nits and scales HLG up
+  to that. A file's own mastering peak is not used; it is often a placeholder.
+- **Subtitles** are drawn at 100 nits in HDR output (`sub-hdr-peak`,
+  `image-subs-hdr-peak`), the white of the interface.
+- **Dolby Vision** profiles 7 and 8 play by their base layer (`vf format=dolbyvision=no`):
+  HDR10, or HLG in what iPhones record. Profile 5 keeps the processing.
+
+## Thumbnails and large video
+
+- The software renderer draws frames as decoded, so thumbnails set `video-rotate=no` and
+  are turned in the app; it applies no Dolby Vision either, so they use the base layer
+  and read the color description after the filters (`video-out-params`). HLG is read as
+  plain BT.2020, which is what its design allows for.
+- A hook (`on_preloaded`) learns the picture's size before anything is decoded. Up to 4K:
+  software. Beyond, H.264 and HEVC: the hardware decoder only, one video at a time. Other
+  codecs beyond 4K: no thumbnail. Stills are always decoded.
+- Starting the player abandons thumbnails in progress; they are made again afterwards.
+- `PlaybackMemory`: playing holds about 36 frames. A video whose frames would take more
+  than 80 % of the app's memory limit (about 3.4 GB on an iPhone) is stopped with a
+  message instead of letting the system end the app.
+- Streams: a stream's cookie stays valid until its registration goes, because mpv may
+  call `cancel_fn` while and after closing the stream.
+
+## Smaller things
+
+- Volume normalization (`normalize-volume` in `yoru.conf`, a labeled `dynaudnorm` filter).
+- A pinch switches between fit and fill; it no longer zooms.
+- Settings is in the toolbar of every folder.
