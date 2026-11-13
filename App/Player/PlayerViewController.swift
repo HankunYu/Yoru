@@ -171,9 +171,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
         // decodes its first frame before the size arrives then fails to show any video.
         view.layoutIfNeeded()
         edrHeadroom = view.window?.windowScene?.screen.potentialEDRHeadroom ?? 1
+        playerView.metalLayer.potentialHeadroom = edrHeadroom
         var options: [(name: String, value: String)] = [
             ("vo", "gpu-next"),
             ("gpu-api", "vulkan"),
+            // In HDR output, subtitles at the white of the interface rather than mpv's
+            // 203 nits, twice as bright next to it.
+            ("sub-hdr-peak", String(Int(MetalLayer.whiteNits))),
+            ("image-subs-hdr-peak", String(Int(MetalLayer.whiteNits))),
             ("gpu-context", "moltenvk"),
             ("hwdec", "videotoolbox"),
             ("keep-open", "yes"),
@@ -225,6 +230,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate 
             model.onReachedEnd = { [weak self] in self?.playbackReachedEnd() }
             // Cached so the background handler can restore it without a synchronous read.
             player.observe("vid", format: .string)
+            // The layer decides the peak the output is described with; mpv renders to it.
+            playerView.metalLayer.onOutputPeakChange = { [weak player] peak in
+                player?.setProperty("target-peak", peak.map { String(Int($0)) } ?? "auto")
+            }
             nowPlaying = NowPlayingSession(model: model)
             startSavingResumePosition()
             eventTask = Task { [weak self] in

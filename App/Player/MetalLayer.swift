@@ -12,25 +12,78 @@ final class MetalLayer: CAMetalLayer {
         }
     }
 
-    // mpv toggles EDR from its render thread, but the display only switches into EDR mode
-    // when this is set on the main thread.
-    override var wantsExtendedDynamicRangeContent: Bool {
-        get { super.wantsExtendedDynamicRangeContent }
+    /// How far above SDR white the screen can go; set before playback starts.
+    var potentialHeadroom: CGFloat = 1
+
+    /// The peak, in nits, HDR output is rendered to and described with. One value for
+    /// every video: what a file's mastering metadata claims is often a placeholder (10 000
+    /// nits is common), and fitting to that leaves the picture dim. mpv brings brighter
+    /// material down to this from what the frames actually contain; it is also HLG's
+    /// nominal peak.
+    static let outputPeakNits: CGFloat = 1000
+
+    /// What white is, in nits, in the description given to the system: the level of the
+    /// interface around the video. Subtitles are drawn at it.
+    static let whiteNits: CGFloat = 100
+
+    /// The peak, in nits, that the output is described with while it is HDR; nil while it
+    /// is not. Called on the main thread whenever it changes.
+    var onOutputPeakChange: ((CGFloat?) -> Void)?
+    private var outputPeak: CGFloat?
+
+    // MoltenVK gives the layer the color space of the surface mpv chose, and on iOS that
+    // is all it does: nothing asks the display for its extended range. Without the ask an
+    // HDR picture is clipped at SDR white, unless another app happens to have the display
+    // in HDR already. So the layer asks, whenever its color space is an HDR one.
+    override var colorspace: CGColorSpace? {
+        get { super.colorspace }
         set {
+            super.colorspace = newValue
+            let isHDR = newValue.map { CGColorSpaceUsesITUR_2100TF($0) || CGColorSpaceUsesExtendedRange($0) } ?? false
+            // Set from mpv's render thread; the display only follows on the main thread.
+            nonisolated(unsafe) let layer = self
+            let apply = { layer.setExtendedRange(isHDR) }
             if Thread.isMainThread {
-                super.wantsExtendedDynamicRangeContent = newValue
+                apply()
             } else {
-                // The render thread blocks until the main thread has applied the value,
-                // so handing the layer over is race-free.
-                nonisolated(unsafe) let layer = self
-                DispatchQueue.main.sync {
-                    layer.setSuperWantsExtendedDynamicRangeContent(newValue)
-                }
+                DispatchQueue.main.async(execute: apply)
             }
         }
     }
 
-    private func setSuperWantsExtendedDynamicRangeContent(_ value: Bool) {
-        super.wantsExtendedDynamicRangeContent = value
+    private func setExtendedRange(_ isOn: Bool) {
+        // The flag is the request up to iOS 25. From iOS 26 a layer states the dynamic
+        // range it prefers and how much headroom its drawables use.
+        wantsExtendedDynamicRangeContent = isOn
+        preferredDynamicRange = isOn ? .high : .standard
+        contentsHeadroom = isOn && potentialHeadroom > 1 ? potentialHeadroom : 0
+        updateMetadata()
+    }
+
+    /// Describes the picture to the system, which then fits its highlights into whatever
+    /// the display can show right now: that changes with the brightness setting and the
+    /// light in the room. Without a description the system shows the values as they are
+    /// and cuts off what the display cannot reach, which reads as overexposure.
+    ///
+    /// mpv has to render to the same peak. Left to guess, it takes a PQ output to reach
+    /// 10 000 nits and scales HLG, whose brightness follows the display's, up to that.
+    private func updateMetadata() {
+        var peak: CGFloat?
+        if let colorspace, CGColorSpaceUsesITUR_2100TF(colorspace) {
+            if colorspace.name == CGColorSpace.itur_2100_HLG {
+                edrMetadata = .hlg
+            } else {
+                edrMetadata = .hdr10(
+                    minLuminance: 0.005, maxLuminance: Float(Self.outputPeakNits), opticalOutputScale: Float(Self.whiteNits)
+                )
+            }
+            peak = Self.outputPeakNits
+        } else {
+            edrMetadata = nil
+        }
+        if peak != outputPeak {
+            outputPeak = peak
+            onOutputPeakChange?(peak)
+        }
     }
 }
