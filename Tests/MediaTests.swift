@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import Yoru
@@ -37,6 +38,8 @@ struct MediaInfoTests {
             MediaInfo(duration: nil, width: width, height: height).resolutionLabel
         }
         #expect(label(3840, 2160) == "4K")
+        #expect(label(7680, 4320) == "8K")
+        #expect(label(4320, 7680) == "8K")
         #expect(label(3840, 1600) == "4K")
         #expect(label(1920, 1080) == "1080p")
         #expect(label(1920, 800) == "1080p")
@@ -152,5 +155,81 @@ struct PreviewCacheTests {
         ]
         // 128 over a limit of 100: down to at most 80, so the two oldest go.
         #expect(MediaPreviewStore.keysToEvict(from: files, limit: 100) == ["old", "mid"])
+    }
+}
+
+struct ThumbnailDecodingTests {
+    @Test func decodesUpTo4KInSoftware() {
+        #expect(ThumbnailRenderer.decodingPlan(width: 3840, height: 2160, codec: "av1") == .software)
+        #expect(ThumbnailRenderer.decodingPlan(width: 4096, height: 2160, codec: "hevc") == .software)
+        #expect(ThumbnailRenderer.decodingPlan(width: nil, height: nil, codec: "hevc") == .software)
+    }
+
+    @Test func leavesLargerVideoToTheHardwareOrSkipsIt() {
+        #expect(ThumbnailRenderer.decodingPlan(width: 7680, height: 4320, codec: "hevc") == .hardwareOnly)
+        #expect(ThumbnailRenderer.decodingPlan(width: 4320, height: 7680, codec: "h264") == .hardwareOnly)
+        #expect(ThumbnailRenderer.decodingPlan(width: 8192, height: 4096, codec: "av1") == .skip)
+    }
+
+    @Test func largePhotosAreASingleFrame() {
+        #expect(ThumbnailRenderer.decodingPlan(width: 12000, height: 9000, codec: "mjpeg") == .software)
+    }
+
+    @Test func turnsFramesClockwise() throws {
+        // Two pixels side by side: red on the left, blue on the right.
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let info = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue
+        let context = try #require(CGContext(data: nil, width: 2, height: 1, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: info))
+        context.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        context.setFillColor(red: 0, green: 0, blue: 1, alpha: 1)
+        context.fill(CGRect(x: 1, y: 0, width: 1, height: 1))
+        let image = try #require(context.makeImage())
+
+        /// The pixels in reading order, as "R" or "B".
+        func pixels(_ image: CGImage) -> [String] {
+            let data = image.dataProvider!.data! as Data
+            return (0..<image.height).flatMap { row in
+                (0..<image.width).map { column in
+                    // BGRX in memory.
+                    data[row * image.bytesPerRow + column * 4 + 2] > 127 ? "R" : "B"
+                }
+            }
+        }
+        #expect(pixels(image) == ["R", "B"])
+        let quarter = ThumbnailRenderer.rotated(image, clockwise: 90)
+        #expect((quarter.width, quarter.height) == (1, 2))
+        // Turned clockwise, the left end comes out on top.
+        #expect(pixels(quarter) == ["R", "B"])
+        #expect(pixels(ThumbnailRenderer.rotated(image, clockwise: 180)) == ["B", "R"])
+        #expect(pixels(ThumbnailRenderer.rotated(image, clockwise: 270)) == ["B", "R"])
+        #expect(ThumbnailRenderer.rotated(image, clockwise: 0) === image)
+    }
+}
+
+struct PlaybackMemoryTests {
+    /// The limit measured on an iPhone: about 3.4 GB.
+    private let limit: Int64 = 3_375 << 20
+
+    @Test func admitsWhatPlayedOnThePhone() {
+        #expect(PlaybackMemory.fits(width: 4096, height: 4096, pixelFormat: "yuv420p", limit: limit))
+        #expect(PlaybackMemory.fits(width: 5760, height: 5760, pixelFormat: "yuv420p", limit: limit))
+        #expect(PlaybackMemory.fits(width: 8192, height: 4608, pixelFormat: "yuv420p", limit: limit))
+        #expect(PlaybackMemory.fits(width: 3840, height: 2160, pixelFormat: "yuv420p10", limit: limit))
+    }
+
+    @Test func declinesWhatTheSystemEndedTheAppFor() {
+        #expect(!PlaybackMemory.fits(width: 8192, height: 8192, pixelFormat: "yuv420p", limit: limit))
+        #expect(!PlaybackMemory.fits(width: 8192, height: 8192, pixelFormat: nil, limit: limit))
+    }
+
+    @Test func deepFormatsCountTwice() {
+        let plain = PlaybackMemory.bytesNeeded(width: 1920, height: 1080, pixelFormat: "yuv420p")
+        #expect(PlaybackMemory.bytesNeeded(width: 1920, height: 1080, pixelFormat: "yuv420p10") == plain * 2)
+        #expect(plain == 1920 * 1080 * 3 / 2 * 36)
+    }
+
+    @Test func aLargerDeviceTakesLargerVideo() {
+        #expect(PlaybackMemory.fits(width: 8192, height: 8192, pixelFormat: "yuv420p", limit: 6 << 30))
     }
 }

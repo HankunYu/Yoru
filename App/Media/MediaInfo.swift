@@ -7,11 +7,12 @@ struct MediaInfo: Codable, Sendable, Equatable {
     var height: Int?
     var isHDR = false
 
-    /// A short resolution name such as `1080p` or `4K`, by the frame's larger class.
+    /// A short resolution name such as `1080p`, `4K` or `8K`, by the frame's larger class.
     var resolutionLabel: String? {
         guard let width, let height, width > 0, height > 0 else { return nil }
         let long = max(width, height)
         let short = min(width, height)
+        if long >= 7600 || short >= 4200 { return "8K" }
         if long >= 3800 || short >= 2100 { return "4K" }
         if long >= 2500 || short >= 1400 { return "1440p" }
         if long >= 1900 || short >= 1000 { return "1080p" }

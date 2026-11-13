@@ -21,7 +21,36 @@ final class MediaPreviewStore: Sendable {
         queue.maxConcurrentOperationCount = 4
         return queue
     }()
-    private let suspensions = OSAllocatedUnfairLock(initialState: 0)
+    private let gate = SuspendGate()
+
+    /// Counts the reasons generation is paused, and lets work in progress wait them out.
+    private final class SuspendGate: @unchecked Sendable {
+        private let condition = NSCondition()
+        private var count = 0
+
+        var isSuspended: Bool {
+            condition.withLock { count > 0 }
+        }
+
+        /// Changes the count and reports the new state while still holding the lock.
+        func change(by amount: Int, _ apply: (_ isSuspended: Bool) -> Void) {
+            condition.withLock {
+                count += amount
+                apply(count > 0)
+                if count == 0 {
+                    condition.broadcast()
+                }
+            }
+        }
+
+        func waitUntilResumed() {
+            condition.withLock {
+                while count > 0 {
+                    condition.wait()
+                }
+            }
+        }
+    }
     private let directory = URL.cachesDirectory.appending(path: "Previews", directoryHint: .isDirectory)
     // NSCache is thread-safe; the box makes the value an object.
     private nonisolated(unsafe) let memory = NSCache<NSString, Box>()
@@ -201,20 +230,15 @@ final class MediaPreviewStore: Sendable {
         }
     }
 
-    /// Pauses generation, e.g. during playback, which should not compete for the CPU.
-    /// Must be balanced by `resume()`.
+    /// Pauses generation, e.g. during playback, which should not compete for the CPU or,
+    /// with large videos, for memory. Thumbnails being made are abandoned at once and
+    /// made again after `resume()`, which must balance this.
     func suspend() {
-        suspensions.withLock { count in
-            count += 1
-            queue.isSuspended = true
-        }
+        gate.change(by: 1) { queue.isSuspended = $0 }
     }
 
     func resume() {
-        suspensions.withLock { count in
-            count -= 1
-            queue.isSuspended = count > 0
-        }
+        gate.change(by: -1) { queue.isSuspended = $0 }
     }
 
     // MARK: - Private (runs on `queue`, several at once)
@@ -230,7 +254,12 @@ final class MediaPreviewStore: Sendable {
             touch(infoURL)
         } else {
             let playback = MediaSources.source(for: item.url).playback(of: item.url)
-            let rendered = ThumbnailRenderer.render(playback)
+            var attempt = ThumbnailRenderer.render(playback) { gate.isSuspended }
+            while attempt == nil {
+                gate.waitUntilResumed()
+                attempt = ThumbnailRenderer.render(playback) { gate.isSuspended }
+            }
+            guard let rendered = attempt else { return MediaPreview(image: nil, info: MediaInfo()) }
             if let image = rendered.image {
                 write(image, to: imageURL)
             }
