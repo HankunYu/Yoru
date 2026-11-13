@@ -1,128 +1,41 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "Advanced Systems Format" : {
-
-    },
-    "CFBundleDisplayName" : {
-      "comment" : "Bundle display name",
-      "extractionState" : "extracted_with_value",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "YORU"
+  "sourceLanguage": "en",
+  "version": "1.0",
+  "strings": {
+    "NSLocalNetworkUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YORU plays media from servers on your local network."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YORU 需要访问本地网络，以播放局域网服务器上的媒体。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YORU 需要取用區域網路，以播放區域網路伺服器上的媒體。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YORU はローカルネットワーク上のサーバにあるメディアを再生します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YORU는 로컬 네트워크에 있는 서버의 미디어를 재생합니다."
           }
         }
       }
-    },
-    "CFBundleName" : {
-      "comment" : "Bundle name",
-      "extractionState" : "extracted_with_value",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Yoru"
-          }
-        }
-      }
-    },
-    "DivX Video" : {
-
-    },
-    "DSD Stream File" : {
-
-    },
-    "DSDIFF Audio" : {
-
-    },
-    "DTS Audio" : {
-
-    },
-    "DVD Video Object" : {
-
-    },
-    "Flash Video" : {
-
-    },
-    "Material Exchange Format" : {
-
-    },
-    "Matroska Audio" : {
-
-    },
-    "Matroska Video" : {
-
-    },
-    "Monkey's Audio" : {
-
-    },
-    "NSLocalNetworkUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YORU plays media from servers on your local network."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YORU はローカルネットワーク上のサーバにあるメディアを再生します。"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YORU는 로컬 네트워크에 있는 서버의 미디어를 재생합니다."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YORU 需要访问本地网络，以播放局域网服务器上的媒体。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "YORU 需要取用區域網路，以播放區域網路伺服器上的媒體。"
-          }
-        }
-      }
-    },
-    "Ogg Audio" : {
-
-    },
-    "Ogg Video" : {
-
-    },
-    "Opus Audio" : {
-
-    },
-    "RealMedia" : {
-
-    },
-    "RealMedia VBR" : {
-
-    },
-    "True Audio" : {
-
-    },
-    "WavPack Audio" : {
-
-    },
-    "WebM Video" : {
-
-    },
-    "Windows Media Audio" : {
-
-    },
-    "Windows Media Video" : {
-
     }
-  },
-  "version" : "1.0"
+  }
 }
