@@ -56,6 +56,8 @@ targets:
       path: App/Resources/Info.plist
       properties:
         CFBundleDisplayName: YORU
+        # Only exempt encryption (TLS, SMB): saves the export question on every upload.
+        ITSAppUsesNonExemptEncryption: false
         CFBundleLocalizations: [en, zh-Hans, zh-Hant, ja, ko]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
